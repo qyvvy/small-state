@@ -1,4 +1,5 @@
 export type Expand<T> = { [K in keyof T]: T[K] } & {}
+export type One<T> = T | [T]
 export type OneOrMany<T> = T | T[]
 export type AnyFn<R = unknown> = R extends any ? (...arg: any[]) => R : never
 export type IsUnknown<T> = unknown extends T ? ([T] extends [unknown] ? true : false) : false

@@ -6,6 +6,10 @@ export type ExtractEvent<E extends EventBody, Et extends E['type']> =
 
 export const JotSymbol: unique symbol = Symbol('Jot')
 export type JotSymbol = typeof JotSymbol
+export const EntrySymbol: unique symbol = Symbol('Entry')
+export type EntrySymbol = typeof EntrySymbol
+export const ExitSymbol: unique symbol = Symbol('Exit')
+export type ExitSymbol = typeof ExitSymbol
 export const SubStatesSymbol: unique symbol = Symbol('SubStates')
 export type SubStatesSymbol = typeof SubStatesSymbol
 export const ParallelSymbol: unique symbol = Symbol('Parallel')
@@ -18,25 +22,24 @@ export const BUILTIN_ETYPES = [':always:', ':childDone:'] as const
 const BuiltinETypeSet = new Set<string>(BUILTIN_ETYPES)
 export type BuiltinEType = (typeof BUILTIN_ETYPES)[number]
 export const isBuiltinEType = (v: string): v is BuiltinEType => BuiltinETypeSet.has(v)
-//export type BuiltinEType = ':always:' | ':entry:'
 
 export type MContext = Record<string, any>
 export type EventBody = { type: string;[key: string]: any }
 export type EmittedEvent = { type: string;[key: string]: any }
 export type StateName = string
 
-export type FnBaseParams<C extends MContext, Ex extends EventBody, I, J> = [
-  arg: { c: C; context: C; e: Ex; event: Ex; input: I; jot: J },
+export type FnBaseParams<C extends MContext, Ex extends EventBody, I, J, Ri = unknown> = [
+  arg: { c: C; context: C; e: Ex; event: Ex; input: I; jot: J; relayed: Ri },
 ]
 export type JotParams<C extends MContext, E extends EventBody, I, Jp> = Expand<
-  Omit<FnBaseParams<C, E, I, Jp>[0], 'e' | 'event'>
+  Omit<FnBaseParams<C, E, I, Jp>[0], 'e' | 'event' | 'relayed'>
 >
 
-export type FnBase<out R, in C extends MContext, in Ex extends EventBody, in I, in J> = (
-  ...args: FnBaseParams<C, Ex, I, J>
-) => R
+export type FnBase<out Ro, in C extends MContext, in Ex extends EventBody, in I, in J, Ri = unknown> = (
+  ...args: FnBaseParams<C, Ex, I, J, Awaited<Ri>>
+) => Ro
 export type GuardFn<in C extends MContext, Ex extends EventBody, I, J> = FnBase<boolean, C, Ex, I, J>
-export type ActionFn<in C extends MContext, Ex extends EventBody, I, J> = FnBase<unknown, C, Ex, I, J>
+export type ActionFn<in C extends MContext, Ex extends EventBody, I, J, Ri, Ro> = FnBase<Ro, C, Ex, I, J, Ri>
 
 
 export type TypedGuardFn<in C extends MContext, in out E extends EventBody, in I> = Expand<
@@ -52,16 +55,16 @@ export type GuardRecord<in C extends MContext, in out E extends EventBody, in I>
 >
 
 // TODO: assign が動かなくなるので使用をやめている
-export type TypedActionFn<in C extends MContext, in out E extends EventBody, in I> = Expand<
-  E['type'] extends infer Et
-  ? Et extends E['type']
-  ? { eType: Et; fn: ActionFn<C, ExtractEvent<E, Et>, I, unknown> }
-  : never
-  : never
->
+//export type TypedActionFn<in C extends MContext, in out E extends EventBody, in I> = Expand<
+//  E['type'] extends infer Et
+//  ? Et extends E['type']
+//  ? { eType: Et; fn: ActionFn<C, ExtractEvent<E, Et>, I, unknown> }
+//  : never
+//  : never
+//>
 export type ActionRecord<in C extends MContext, in out E extends EventBody, in I> = Record<
   string,
-  ActionFn<C, E, I, unknown> | TypedActionFn<C, E, I>
+  ActionFn<C, E, I, unknown, unknown, unknown>
 >
 //export type ServiceRecord<A, R> = Record<string, (...arg: A) => R>
 //export type Service<A extends any[], R> = (...arg: A) => R

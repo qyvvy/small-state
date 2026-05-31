@@ -1,14 +1,16 @@
 //import { Machine } from './Machine'
 
 import { ST_DELIM } from '../shared/constants'
-import { assertOrThrow, assertOrWarn, deepFreeze, ensureArray, randomString } from '../shared/utils'
-import type { AnyFn, Expand, Fallback, OneOrMany } from './m.general.types'
+import { assertOrThrow, deepFreeze, ensureArray, randomString } from '../shared/utils'
+import type { AnyFn, Expand, One, OneOrMany } from './m.general.types'
 import {
   type ActionFn,
   type ActionRecord,
   type BuiltinEType,
   type EmittedEvent,
+  EntrySymbol,
   type EventBody,
+  ExitSymbol,
   type ExtractEvent,
   type FnBase,
   type FnBaseParams,
@@ -31,7 +33,6 @@ import {
   ParallelSymbol,
   type StateName,
   SubStatesSymbol,
-  type TypedActionFn,
   type TypedGuardFn,
 } from './m.types'
 import * as ark from './m_arktype'
@@ -40,21 +41,45 @@ type T_HiddenImpl = any & { __brand: 'HiddenImpl' }
 type T_DefTypeRefluxer<
   C extends MContext,
   E extends EventBody,
-  I,
+  I, // Input
   Gk extends string,
-  Ak extends string,
-  J,
+  //Ak extends string,
+  A extends ActionRecord<C, E, I>,
+  J, // Current Jot
   Jp,
-  S extends Record<string, (input: any) => unknown> = Record<string, (input: any) => unknown>,
+  S extends Record<string, (input: any) => unknown> = Record<string, (input: any) => unknown>, // Services
   R = unknown,
 > = () => R
 
+type O_Relayed<C extends MContext, E extends EventBody, I, A extends ActionRecord<C, E, I>, AkAsRi, Ri> = [Ri] extends [
+  never,
+]
+  ? AkAsRi extends keyof A
+  ? ReturnType<A[AkAsRi]>
+  : unknown
+  : Ri
+
+type ActionEl<
+  C extends MContext,
+  E extends EventBody,
+  I,
+  A extends ActionRecord<C, E, I>,
+  J,
+  Ex extends EventBody,
+  AkAsRi extends string | unknown,
+  Ri = never,
+  Ako extends keyof A & string = keyof A & string,
+  Ro = never,
+> = ActionFn<C, Ex, I, J, O_Relayed<C, E, I, A, AkAsRi, Ri>, Ro> | Ako
+
 type T_DefineStatesParamPart = {
+  entry: typeof entry
+  exit: typeof exit
   on: typeof on
   AttachJot: typeof AttachJot
   subStates: typeof subStates
   parallel: typeof parallel
-  invoke: typeof invoke
+  //invoke: typeof invoke
 }
 type U_ExtractAryElementsFromMaybeJotted<T> =
   T extends Array<infer El> ? El : T extends readonly [JotSymbol, any, Array<infer El>] ? El : never
@@ -109,33 +134,33 @@ export function or<C extends MContext, Ex extends EventBody, I, J, Gk extends st
   return fn
 }
 
-type Assignment<C extends MContext, Ex extends EventBody, I, J> =
-  { [P in keyof C]?: C[P] | FnBase<C[P], C, Ex, I, J> }
-type AssignmentFn<C extends MContext, Ex extends EventBody, I, J> =
-  FnBase<Partial<C>, C, Ex, I, J>
+type O_AssignmentObj<C extends MContext, Ex extends EventBody, I, J, Ri> = {
+  [P in keyof C]?: C[P] | ActionFn<C, Ex, I, J, Ri, C[P] | Promise<C[P]>>
+}
+type O_AssignmentFn<C extends MContext, Ex extends EventBody, I, J, Ri> = ActionFn<C, Ex, I, J, Ri, Partial<C> | Promise<Partial<C>>>
 
-export function assign<C extends MContext, Ex extends EventBody, I, J>(
-  assignment: Assignment<NoInfer<C>, Ex, I, J>
-): ActionFn<C, Ex, I, J>
-export function assign<C extends MContext, Ex extends EventBody, I, J>(
-  fn: AssignmentFn<NoInfer<C>, Ex, I, J>
-): ActionFn<C, Ex, I, J>
-export function assign<C extends MContext, Ex extends EventBody, I, J>(
+export function assign<C extends MContext, Ex extends EventBody, I, J, Ri>(
+  assignment: O_AssignmentObj<NoInfer<C>, Ex, I, J, Ri>,
+): ActionFn<C, Ex, I, J, Ri, unknown>
+export function assign<C extends MContext, Ex extends EventBody, I, J, Ri>(
+  fn: O_AssignmentFn<NoInfer<C>, Ex, I, J, Ri>,
+): ActionFn<C, Ex, I, J, Ri, unknown>
+export function assign<C extends MContext, Ex extends EventBody, I, J, Ri>(
   arg?: FnBase<Partial<C>, C, Ex, I, J> | { [P in keyof C]?: C[P] | FnBase<C[P], C, Ex, I, J> },
-): ActionFn<C, Ex, I, J> {
+): ActionFn<C, Ex, I, J, Ri, unknown> {
   switch (typeof arg) {
     case 'function':
-      return (param: FnBaseParams<C, Ex, I, J>[0]) => {
+      return (param: FnBaseParams<C, Ex, I, J, Ri>[0]) => {
         // TODO
         const newCtxPartial = arg(param)
       }
     case 'object':
-      return (param: FnBaseParams<C, Ex, I, J>[0]) => {
+      return (param: FnBaseParams<C, Ex, I, J, Ri>[0]) => {
         // TODO
         //arg
       }
     default:
-      return (param: FnBaseParams<C, Ex, I, J>[0]) => { }
+      return (param: FnBaseParams<C, Ex, I, J, Ri>[0]) => { }
   }
 }
 
@@ -157,58 +182,65 @@ const getNormalizedStDefTemplate = (): {
   sub: null,
 })
 
-type StDefMetaEntry<in out C extends MContext, in out E extends EventBody, in out I, J> = {
+type StDefMetaInfo<in out C extends MContext, in out E extends EventBody, in out I, J> = {
   tags?: string[]
-  entry?: OneOrMany<ActionFn<C, E, I, J>>
-  exit?: OneOrMany<ActionFn<C, E, I, J>>
+  //entry?: OneOrMany<ActionFn<C, E, I, J, unknown, unknown>>
+  //exit?: OneOrMany<ActionFn<C, E, I, J, unknown, unknown>>
   final?: boolean
   //always?: OneOrMany<Transition<C, E, I, Gk, Ak, J>>
   //delays?: OneOrMany<Delay<C, E, I, Gk, Ak, J>>
 }
 
-type StDefEntries<
+type StDefItems<
   C extends MContext,
   E extends EventBody,
   I,
   Gk extends string,
-  Ak extends string,
+  A extends ActionRecord<C, E, I>,
   J,
   Jp,
   S extends Record<string, (input: any) => unknown>,
   Et extends E['type'] | BuiltinEType = E['type'] | BuiltinEType,
 > = Array<
-  | StDefMetaEntry<C, E, I, J>
-  | readonly [Et, T_DefTypeRefluxer<C, E, I, Gk, Ak, J, unknown>, T_HiddenImpl] // on
-  | readonly [T_DefTypeRefluxer<C, E, I, Gk, Ak, J, Jp, S, any>, unknown] // subStates|parallel
+  | StDefMetaInfo<C, E, I, J>
+  | readonly [Et, T_DefTypeRefluxer<C, E, I, Gk, A, J, unknown>, T_HiddenImpl] // on
+  | readonly [T_DefTypeRefluxer<C, E, I, Gk, A, J, Jp, S, any>, unknown] // subStates|parallel|entry|exit
   // NOTE: NormalizedDefinition でなく unknown にしないと ExtractEType が上手く働かない
-  | readonly [InvokeSymbol, T_DefTypeRefluxer<C, E, I, Gk, Ak, J, Jp, S>, unknown, unknown]
+  | readonly [InvokeSymbol, T_DefTypeRefluxer<C, E, I, Gk, A, J, Jp, S>, unknown, unknown]
 >
 
-type RegionStDefEntry<C extends MContext, E extends EventBody, I, Gk extends string, Ak extends string, J> =
-  | StDefMetaEntry<C, E, I, J>
-  | readonly [E['type'] | BuiltinEType, T_DefTypeRefluxer<C, E, I, Gk, Ak, J, unknown>, T_HiddenImpl] // on
+type RegionStDefItem<
+  C extends MContext,
+  E extends EventBody,
+  I,
+  Gk extends string,
+  A extends ActionRecord<C, E, I>,
+  J,
+> =
+  | StDefMetaInfo<C, E, I, J>
+  | readonly [E['type'] | BuiltinEType, T_DefTypeRefluxer<C, E, I, Gk, A, J, unknown>, T_HiddenImpl] // on
 
 type StateDefinition<
   C extends MContext,
   E extends EventBody,
   I,
   Gk extends string,
-  Ak extends string,
+  A extends ActionRecord<C, E, I>,
   Je,
   J,
   Jp,
   S extends Record<string, (input: any) => unknown>,
 > =
   | null
-  | StDefEntries<C, E, I, Gk, Ak, J, Jp, S> // on, subStates, parallel
-  | readonly [JotSymbol, Je, StDefEntries<C, E, I, Gk, Ak, any, Jp, S>] // AttachJot
+  | StDefItems<C, E, I, Gk, A, J, Jp, S> // on, subStates, parallel
+  | readonly [JotSymbol, Je, StDefItems<C, E, I, Gk, A, any, Jp, S>] // AttachJot
 
 function AttachJot<
   C extends MContext,
   E extends EventBody,
   I,
   Gk extends string,
-  Ak extends string,
+  A extends ActionRecord<C, E, I>,
   S extends Record<string, (input: any) => unknown>,
   Jp,
   J,
@@ -216,49 +248,531 @@ function AttachJot<
   const Sub,
 >(
   jot: J | ((arg: JotParams<C, E, I, Jp>) => J | Promise<J>), // NOTE: jotに関数を指定した場合、引数の型を明示しないと jot が any 扱いされる問題がある
-  stateDefEntries: Array<
-    | StDefMetaEntry<C, E, I, J>
-    | readonly [Et, T_DefTypeRefluxer<C, E, I, Gk, Ak, J, Jp>, T_HiddenImpl] // on
-    | readonly [T_DefTypeRefluxer<C, E, I, Gk, Ak, J, Jp, S, any>, Sub] // subStates|parallel
-    | readonly [InvokeSymbol, T_DefTypeRefluxer<C, E, I, Gk, Ak, J, Jp, S>, unknown, unknown]
+  stateDefItems: Array<
+    | StDefMetaInfo<C, E, I, J>
+    | readonly [Et, T_DefTypeRefluxer<C, E, I, Gk, A, J, Jp>, T_HiddenImpl] // on
+    | readonly [T_DefTypeRefluxer<C, E, I, Gk, A, J, Jp, S, any>, Sub] // subStates|parallel
+    | readonly [InvokeSymbol, T_DefTypeRefluxer<C, E, I, Gk, A, J, Jp, S>, unknown, unknown]
   >,
-  // NOTE: StDefEntries でなく展開して Et と Sub をジェネリクス化しておかないと上から参照できない
+  // NOTE: StDefItems でなく展開して Et と Sub をジェネリクス化しておかないと上から参照できない
   // NOTE: AttachJot が絡むとタプル内部の型でなく要素数で判別しているようなので invoke の要素数は 4 でなければならない
 ) {
-  return [JotSymbol, jot, stateDefEntries] as const // StateDefinition
+  return [JotSymbol, jot, stateDefItems] as const // StateDefinition
 }
+
+// overloads:
+function entry<
+  C extends MContext,
+  E extends EventBody,
+  I,
+  A extends ActionRecord<C, E, I>,
+  Ak extends keyof A & string,
+  J,
+  Ak1 extends Ak,
+  Ak2 extends Ak,
+  Ak3 extends Ak,
+  R1 = never,
+  R2 = never,
+  R3 = never,
+>(
+  actions: [
+    ActionEl<C, E, I, A, J, E, unknown, unknown, Ak1, R1>?,
+    ActionEl<C, E, I, A, J, E, Ak1, R1, Ak2, R2>?,
+    ActionEl<C, E, I, A, J, E, Ak2, R2, Ak3, R3>?,
+    ActionEl<C, E, I, A, J, E, Ak3, R3, Ak, unknown>?,
+    ...ActionEl<C, E, I, A, J, E, unknown, unknown, Ak, unknown>[],
+  ],
+): readonly [
+  T_DefTypeRefluxer<C, E, I, any, A, J, unknown, Record<string, (input: any) => unknown>, typeof EntrySymbol>,
+  ActionEl<C, E, I, A, J, E, unknown, unknown, Ak, unknown>[],
+]
+function entry<
+  C extends MContext,
+  E extends EventBody,
+  I,
+  A extends ActionRecord<C, E, I>,
+  Ak extends keyof A & string,
+  J,
+>(
+  actions: OneOrMany<ActionEl<C, E, I, A, J, E, unknown, unknown, Ak, unknown>>,
+): readonly [
+  T_DefTypeRefluxer<C, E, I, any, A, J, unknown, Record<string, (input: any) => unknown>, typeof EntrySymbol>,
+  ActionEl<C, E, I, A, J, E, unknown, unknown, Ak, unknown>[],
+]
+// implementation:
+function entry<
+  C extends MContext,
+  E extends EventBody,
+  I,
+  A extends ActionRecord<C, E, I>,
+  Ak extends keyof A & string,
+  J,
+>(actions: OneOrMany<ActionEl<C, E, I, A, J, E, unknown, unknown, Ak, unknown>>) {
+  return [
+    (() => EntrySymbol) as T_DefTypeRefluxer<
+      C,
+      E,
+      I,
+      any,
+      A,
+      J,
+      unknown,
+      Record<string, (input: any) => unknown>,
+      EntrySymbol
+    >,
+    actions,
+  ] as const // StDefItems, AttachJot
+}
+
+// overloads:
+function exit<
+  C extends MContext,
+  E extends EventBody,
+  I,
+  A extends ActionRecord<C, E, I>,
+  Ak extends keyof A & string,
+  J,
+  Ak1 extends Ak,
+  Ak2 extends Ak,
+  Ak3 extends Ak,
+  R1 = never,
+  R2 = never,
+  R3 = never,
+>(
+  actions: [
+    ActionEl<C, E, I, A, J, E, unknown, unknown, Ak1, R1>?,
+    ActionEl<C, E, I, A, J, E, Ak1, R1, Ak2, R2>?,
+    ActionEl<C, E, I, A, J, E, Ak2, R2, Ak3, R3>?,
+    ActionEl<C, E, I, A, J, E, Ak3, R3, Ak, unknown>?,
+    ...ActionEl<C, E, I, A, J, E, unknown, unknown, Ak, unknown>[],
+  ],
+): readonly [
+  T_DefTypeRefluxer<C, E, I, any, A, J, unknown, Record<string, (input: any) => unknown>, typeof ExitSymbol>,
+  ActionEl<C, E, I, A, J, E, unknown, unknown, Ak, unknown>[],
+]
+// implementation:
+function exit<
+  C extends MContext,
+  E extends EventBody,
+  I,
+  A extends ActionRecord<C, E, I>,
+  Ak extends keyof A & string,
+  J,
+>(
+  actions: OneOrMany<ActionEl<C, E, I, A, J, E, unknown, unknown, Ak, unknown>>,
+): readonly [
+  T_DefTypeRefluxer<C, E, I, any, A, J, unknown, Record<string, (input: any) => unknown>, typeof ExitSymbol>,
+  ActionEl<C, E, I, A, J, E, unknown, unknown, Ak, unknown>[],
+]
+function exit<
+  C extends MContext,
+  E extends EventBody,
+  I,
+  A extends ActionRecord<C, E, I>,
+  Ak extends keyof A & string,
+  J,
+>(actions: OneOrMany<ActionEl<C, E, I, A, J, E, unknown, unknown, Ak, unknown>>) {
+  return [
+    (() => ExitSymbol) as T_DefTypeRefluxer<
+      C,
+      E,
+      I,
+      any,
+      A,
+      J,
+      unknown,
+      Record<string, (input: any) => unknown>,
+      ExitSymbol
+    >,
+    actions,
+  ] as const // StDefItems, AttachJot
+}
+
+type O_OnConfigPart<
+  C extends MContext,
+  Ex extends EventBody,
+  I,
+  Gk extends string,
+  J,
+  As extends OneOrMany<ActionEl<C, any, I, any, J, Ex, any, any, any, any>>,
+> = Expand<
+  TransitionPart<C, Ex, I, Gk, J> & {
+    actions?: As
+  }
+>
+
+// overloads:
+function on<
+  C extends MContext,
+  E extends EventBody,
+  I,
+  Gk extends string,
+  A extends ActionRecord<C, E, I>,
+  Ak extends keyof A & string,
+  Et extends E['type'] | BuiltinEType,
+  Ex extends ExtractEvent<E, Et>,
+  J,
+  Ak11 extends Ak,
+  Ak12 extends Ak,
+  Ak13 extends Ak,
+  R11 = never,
+  R12 = never,
+  R13 = never,
+>(
+  eventType: Et,
+  config: One<
+    Expand<
+      O_OnConfigPart<
+        C,
+        Ex,
+        I,
+        Gk,
+        J,
+        | ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak, unknown>
+        | [
+          ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak11, R11>,
+          ActionEl<C, E, I, A, J, Ex, Ak11, R11, Ak12, R12>?,
+          ActionEl<C, E, I, A, J, Ex, Ak12, R12, Ak13, R13>?,
+          ActionEl<C, E, I, A, J, Ex, Ak13, R13, Ak, unknown>?,
+          ...Array<ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak, unknown>>,
+        ]
+      >
+    >
+  >,
+): readonly [Et, T_DefTypeRefluxer<C, E, I, Gk, A, J, unknown, Record<string, (input: any) => unknown>, unknown>, any]
 
 function on<
   C extends MContext,
   E extends EventBody,
   I,
   Gk extends string,
-  Ak extends string,
+  A extends ActionRecord<C, E, I>,
+  Ak extends keyof A & string,
   Et extends E['type'] | BuiltinEType,
+  Ex extends ExtractEvent<E, Et>,
   J,
->(eventType: Et, config: OneOrMany<Expand<Transition<C, ExtractEvent<E, Et>, I, Gk, Ak, J>>>) {
+  Ak11 extends Ak,
+  Ak12 extends Ak,
+  Ak13 extends Ak,
+  Ak21 extends Ak,
+  Ak22 extends Ak,
+  Ak23 extends Ak,
+  R11 = never,
+  R12 = never,
+  R13 = never,
+  R21 = never,
+  R22 = never,
+  R23 = never,
+>(
+  eventType: Et,
+  config: [
+    Expand<
+      O_OnConfigPart<
+        C,
+        Ex,
+        I,
+        Gk,
+        J,
+        | ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak, unknown>
+        | [
+          ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak11, R11>,
+          ActionEl<C, E, I, A, J, Ex, Ak11, R11, Ak12, R12>?,
+          ActionEl<C, E, I, A, J, Ex, Ak12, R12, Ak13, R13>?,
+          ActionEl<C, E, I, A, J, Ex, Ak13, R13, Ak, unknown>?,
+          ...Array<ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak, unknown>>,
+        ]
+      >
+    >,
+    Expand<
+      O_OnConfigPart<
+        C,
+        Ex,
+        I,
+        Gk,
+        J,
+        | ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak, unknown>
+        | [
+          ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak21, R21>,
+          ActionEl<C, E, I, A, J, Ex, Ak21, R21, Ak22, R22>?,
+          ActionEl<C, E, I, A, J, Ex, Ak22, R22, Ak23, R23>?,
+          ActionEl<C, E, I, A, J, Ex, Ak23, R23, Ak, unknown>?,
+          ...Array<ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak, unknown>>,
+        ]
+      >
+    >,
+  ],
+): readonly [Et, T_DefTypeRefluxer<C, E, I, Gk, A, J, unknown, Record<string, (input: any) => unknown>, unknown>, any]
+
+function on<
+  C extends MContext,
+  E extends EventBody,
+  I,
+  Gk extends string,
+  A extends ActionRecord<C, E, I>,
+  Ak extends keyof A & string,
+  Et extends E['type'] | BuiltinEType,
+  Ex extends ExtractEvent<E, Et>,
+  J,
+  Ak11 extends Ak,
+  Ak12 extends Ak,
+  Ak13 extends Ak,
+  Ak21 extends Ak,
+  Ak22 extends Ak,
+  Ak23 extends Ak,
+  Ak31 extends Ak,
+  Ak32 extends Ak,
+  Ak33 extends Ak,
+  R11 = never,
+  R12 = never,
+  R13 = never,
+  R21 = never,
+  R22 = never,
+  R23 = never,
+  R31 = never,
+  R32 = never,
+  R33 = never,
+>(
+  eventType: Et,
+  config: [
+    Expand<
+      O_OnConfigPart<
+        C,
+        Ex,
+        I,
+        Gk,
+        J,
+        | ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak, unknown>
+        | [
+          ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak11, R11>,
+          ActionEl<C, E, I, A, J, Ex, Ak11, R11, Ak12, R12>?,
+          ActionEl<C, E, I, A, J, Ex, Ak12, R12, Ak13, R13>?,
+          ActionEl<C, E, I, A, J, Ex, Ak13, R13, Ak, unknown>?,
+          ...Array<ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak, unknown>>,
+        ]
+      >
+    >,
+    Expand<
+      O_OnConfigPart<
+        C,
+        Ex,
+        I,
+        Gk,
+        J,
+        | ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak, unknown>
+        | [
+          ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak21, R21>,
+          ActionEl<C, E, I, A, J, Ex, Ak21, R21, Ak22, R22>?,
+          ActionEl<C, E, I, A, J, Ex, Ak22, R22, Ak23, R23>?,
+          ActionEl<C, E, I, A, J, Ex, Ak23, R23, Ak, unknown>?,
+          ...Array<ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak, unknown>>,
+        ]
+      >
+    >,
+    Expand<
+      O_OnConfigPart<
+        C,
+        Ex,
+        I,
+        Gk,
+        J,
+        | ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak, unknown>
+        | [
+          ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak31, R31>,
+          ActionEl<C, E, I, A, J, Ex, Ak31, R31, Ak32, R32>?,
+          ActionEl<C, E, I, A, J, Ex, Ak32, R32, Ak33, R33>?,
+          ActionEl<C, E, I, A, J, Ex, Ak33, R33, Ak, unknown>?,
+          ...Array<ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak, unknown>>,
+        ]
+      >
+    >,
+  ],
+): readonly [Et, T_DefTypeRefluxer<C, E, I, Gk, A, J, unknown, Record<string, (input: any) => unknown>, unknown>, any]
+
+function on<
+  C extends MContext,
+  E extends EventBody,
+  I,
+  Gk extends string,
+  A extends ActionRecord<C, E, I>,
+  Ak extends keyof A & string,
+  Et extends E['type'] | BuiltinEType,
+  Ex extends ExtractEvent<E, Et>,
+  J,
+  Ak11 extends Ak,
+  Ak12 extends Ak,
+  Ak13 extends Ak,
+  Ak21 extends Ak,
+  Ak22 extends Ak,
+  Ak23 extends Ak,
+  Ak31 extends Ak,
+  Ak32 extends Ak,
+  Ak33 extends Ak,
+  Ak41 extends Ak,
+  Ak42 extends Ak,
+  Ak43 extends Ak,
+  R11 = never,
+  R12 = never,
+  R13 = never,
+  R21 = never,
+  R22 = never,
+  R23 = never,
+  R31 = never,
+  R32 = never,
+  R33 = never,
+  R41 = never,
+  R42 = never,
+  R43 = never,
+>(
+  eventType: Et,
+  config: [
+    Expand<
+      O_OnConfigPart<
+        C,
+        Ex,
+        I,
+        Gk,
+        J,
+        | ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak, unknown>
+        | [
+          ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak11, R11>,
+          ActionEl<C, E, I, A, J, Ex, Ak11, R11, Ak12, R12>?,
+          ActionEl<C, E, I, A, J, Ex, Ak12, R12, Ak13, R13>?,
+          ActionEl<C, E, I, A, J, Ex, Ak13, R13, Ak, unknown>?,
+          ...Array<ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak, unknown>>,
+        ]
+      >
+    >,
+    Expand<
+      O_OnConfigPart<
+        C,
+        Ex,
+        I,
+        Gk,
+        J,
+        | ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak, unknown>
+        | [
+          ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak21, R21>,
+          ActionEl<C, E, I, A, J, Ex, Ak21, R21, Ak22, R22>?,
+          ActionEl<C, E, I, A, J, Ex, Ak22, R22, Ak23, R23>?,
+          ActionEl<C, E, I, A, J, Ex, Ak23, R23, Ak, unknown>?,
+          ...Array<ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak, unknown>>,
+        ]
+      >
+    >,
+    Expand<
+      O_OnConfigPart<
+        C,
+        Ex,
+        I,
+        Gk,
+        J,
+        | ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak, unknown>
+        | [
+          ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak31, R31>,
+          ActionEl<C, E, I, A, J, Ex, Ak31, R31, Ak32, R32>?,
+          ActionEl<C, E, I, A, J, Ex, Ak32, R32, Ak33, R33>?,
+          ActionEl<C, E, I, A, J, Ex, Ak33, R33, Ak, unknown>?,
+          ...Array<ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak, unknown>>,
+        ]
+      >
+    >,
+    Expand<
+      O_OnConfigPart<
+        C,
+        Ex,
+        I,
+        Gk,
+        J,
+        | ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak, unknown>
+        | [
+          ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak41, R41>,
+          ActionEl<C, E, I, A, J, Ex, Ak41, R41, Ak42, R42>?,
+          ActionEl<C, E, I, A, J, Ex, Ak42, R42, Ak43, R43>?,
+          ActionEl<C, E, I, A, J, Ex, Ak43, R43, Ak, unknown>?,
+          ...Array<ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak, unknown>>,
+        ]
+      >
+    >,
+    ...Array<
+      Expand<O_OnConfigPart<C, Ex, I, Gk, J, OneOrMany<ActionEl<C, E, I, A, J, Ex, unknown, unknown, Ak, unknown>>>>
+    >,
+  ],
+): readonly [Et, T_DefTypeRefluxer<C, E, I, Gk, A, J, unknown, Record<string, (input: any) => unknown>, unknown>, any]
+
+function on<
+  C extends MContext,
+  E extends EventBody,
+  I,
+  Gk extends string,
+  A extends ActionRecord<C, E, I>,
+  Ak extends keyof A & string,
+  Et extends E['type'] | BuiltinEType,
+  Ex extends ExtractEvent<E, Et>,
+  J,
+>(
+  eventType: Et,
+  config: OneOrMany<
+    Expand<
+      O_OnConfigPart<
+        C,
+        Ex,
+        I,
+        Gk,
+        J,
+        OneOrMany<ActionEl<C, E, I, A, J, Ex, unknown, unknown, keyof A & string, unknown>>
+      >
+    >
+  >,
+): readonly [Et, T_DefTypeRefluxer<C, E, I, Gk, A, J, unknown, Record<string, (input: any) => unknown>, unknown>, any]
+
+// implementation:
+function on<
+  C extends MContext,
+  E extends EventBody,
+  I,
+  Gk extends string,
+  A extends ActionRecord<C, E, I>,
+  Et extends E['type'] | BuiltinEType,
+  Ex extends ExtractEvent<E, Et>,
+  J,
+>(
+  eventType: Et,
+  config: OneOrMany<
+    Expand<
+      O_OnConfigPart<
+        C,
+        Ex,
+        I,
+        Gk,
+        J,
+        OneOrMany<ActionEl<C, E, I, A, J, Ex, unknown, unknown, keyof A & string, unknown>>
+      >
+    >
+  >,
+) {
   return [
     eventType as Et,
-    (() => null) as T_DefTypeRefluxer<C, E, I, Gk, Ak, J, unknown>,
+    (() => null) as T_DefTypeRefluxer<C, E, I, Gk, A, J, unknown>,
     config as T_HiddenImpl,
-  ] as const // StDefEntries, AttachJot
+  ] as const // StDefItems, AttachJot
 }
 
+// overloads:
 function subStates<
   C extends MContext,
   E extends EventBody,
   I,
   Gk extends string,
-  Ak extends string,
+  A extends ActionRecord<C, E, I>,
   S extends Record<string, (input: any) => unknown>,
   J,
   Jp,
-  const D extends { [K in string]: StateDefinition<C, E, I, Gk, Ak, Jd[K], J, Jp, S> },
+  const D extends { [K in string]: StateDefinition<C, E, I, Gk, A, Jd[K], J, Jp, S> },
   Jd extends { [K in keyof D]: unknown },
 >(
   stateDefinition: D,
 ): readonly [
-  T_DefTypeRefluxer<C, E, I, Gk, Ak, J, Jp, S, SubStatesSymbol>,
+  T_DefTypeRefluxer<C, E, I, Gk, A, J, Jp, S, SubStatesSymbol>,
   {
     initial: keyof D extends never ? undefined : keyof D
     states: {
@@ -274,18 +788,18 @@ function subStates<
   E extends EventBody,
   I,
   Gk extends string,
-  Ak extends string,
+  A extends ActionRecord<C, E, I>,
   S extends Record<string, (input: any) => unknown>,
   J,
   Jp,
-  const D extends { [K in string]: StateDefinition<C, E, I, Gk, Ak, Jd[K], J, Jp, S> },
+  const D extends { [K in string]: StateDefinition<C, E, I, Gk, A, Jd[K], J, Jp, S> },
   Jd extends { [K in keyof D]: unknown },
   const Initial extends keyof D & string,
 >(
   initialState: Initial,
   stateDefinition: D,
 ): readonly [
-  T_DefTypeRefluxer<C, E, I, Gk, Ak, J, Jp, S, SubStatesSymbol>,
+  T_DefTypeRefluxer<C, E, I, Gk, A, J, Jp, S, SubStatesSymbol>,
   {
     initial: Initial
     states: {
@@ -296,16 +810,17 @@ function subStates<
     }
   },
 ]
+// implementation:
 function subStates<
   C extends MContext,
   E extends EventBody,
   I,
   Gk extends string,
-  Ak extends string,
+  A extends ActionRecord<C, E, I>,
   S extends Record<string, (input: any) => unknown>,
   J,
   Jp,
-  const D extends { [K in string]: StateDefinition<C, E, I, Gk, Ak, Jd[K], J, Jp, S> },
+  const D extends { [K in string]: StateDefinition<C, E, I, Gk, A, Jd[K], J, Jp, S> },
   Jd extends { [K in keyof D]: unknown },
   const Arg1 extends D | (keyof D & string),
 >(arg1: Arg1, arg2?: D) {
@@ -315,8 +830,8 @@ function subStates<
     return [d, Object.keys(d)?.[0]]
   })()
   return [
-    (() => SubStatesSymbol) as T_DefTypeRefluxer<C, E, I, Gk, Ak, J, Jp, S, SubStatesSymbol>,
-    transformNormalizedDefinition<C, E, I, Gk, Ak>()(stateDefinition, initialState) as {
+    (() => SubStatesSymbol) as T_DefTypeRefluxer<C, E, I, Gk, A, J, Jp, S, SubStatesSymbol>,
+    transformNormalizedDefinition<C, E, I, Gk, A>()(stateDefinition, initialState) as {
       initial: Arg1 extends keyof D ? Arg1 : keyof D
       states: {
         [K in keyof D]: {
@@ -325,7 +840,7 @@ function subStates<
         }
       }
     },
-  ] as const // StDefEntries, AttachJot
+  ] as const // StDefItems, AttachJot
 }
 
 type O_InnerDict<T> = T extends [...any[], infer Last] ? Last : never
@@ -345,24 +860,24 @@ function parallel<
   E extends EventBody,
   I,
   Gk extends string,
-  Ak extends string,
+  A extends ActionRecord<C, E, I>,
   S extends Record<string, (input: any) => unknown>,
   J,
   Jp,
   const PD extends {
     [K in string]:
-    | [{ [L in string]: StateDefinition<C, E, I, Gk, Ak, Jd[K][L], J, Jp, S> }]
+    | [{ [L in string]: StateDefinition<C, E, I, Gk, A, Jd[K][L], J, Jp, S> }]
     | [
-      Array<RegionStDefEntry<C, E, I, Gk, Ak, J>>,
-      { [L in string]: StateDefinition<C, E, I, Gk, Ak, Jd[K][L], J, Jp, S> },
+      Array<RegionStDefItem<C, E, I, Gk, A, J>>,
+      { [L in string]: StateDefinition<C, E, I, Gk, A, Jd[K][L], J, Jp, S> },
     ]
     | []
   },
   Jd extends { [K in keyof PD]: { [L in keyof O_InnerDict<PD[K]>]: unknown } },
 >(parallelDefinition: PD) {
   return [
-    (() => ParallelSymbol) as T_DefTypeRefluxer<C, E, I, Gk, Ak, J, Jp, S, ParallelSymbol>,
-    transformParallelNormalizedDefinition<C, E, I, Gk, Ak, J>()(parallelDefinition) as {
+    (() => ParallelSymbol) as T_DefTypeRefluxer<C, E, I, Gk, A, J, Jp, S, ParallelSymbol>,
+    transformParallelNormalizedDefinition<C, E, I, Gk, A, J>()(parallelDefinition) as {
       nType: 'parallel'
       regions: {
         [K in keyof PD]: {
@@ -379,53 +894,58 @@ function parallel<
         }
       }
     },
-  ] as const // StDefEntries, AttachJot
+  ] as const // StDefItems, AttachJot
 }
 
-type O_IntoServiceFn<Src, S extends Record<string, unknown>> = Src extends AnyFn
-  ? Src
-  : Src extends keyof S
-  ? S[Src]
-  : never
-function invoke<
-  C extends MContext,
-  E extends EventBody,
-  I,
-  Gk extends string,
-  Ak extends string,
-  S extends Record<string, (input: any) => unknown>,
-  J,
-  Src extends ((input: any) => unknown) | keyof S,
->(
-  preparation: { id?: string; input?: FnBase<Parameters<O_IntoServiceFn<Src, S>>[0], C, E, I, J> },
-  src: Src,
-  completion?: {
-    done: Transition<C, { type: 'done'; data: Awaited<ReturnType<O_IntoServiceFn<Src, S>>> }, I, Gk, Ak, J>
-    error?: Transition<C, { type: 'error'; error: Error }, I, Gk, Ak, J>
-  },
-) {
-  return [
-    InvokeSymbol,
-    (() => null) as T_DefTypeRefluxer<C, E, I, Gk, Ak, J, unknown, S>,
-    { src, ...preparation, ...completion } as T_HiddenImpl,
-    null,
-  ] as const // StDefEntries, AttachJot
-}
+//type O_IntoServiceFn<Src, S extends Record<string, unknown>> = Src extends AnyFn
+//  ? Src
+//  : Src extends keyof S
+//  ? S[Src]
+//  : never
+//function invoke<
+//  C extends MContext,
+//  E extends EventBody,
+//  I,
+//  Gk extends string,
+//  Ak extends string,
+//  S extends Record<string, (input: any) => unknown>,
+//  J,
+//  Src extends ((input: any) => unknown) | keyof S,
+//>(
+//  preparation: { id?: string; input?: FnBase<Parameters<O_IntoServiceFn<Src, S>>[0], C, E, I, J> },
+//  src: Src,
+//  completion?: {
+//    done: TransitionPart<C, { type: 'done'; data: Awaited<ReturnType<O_IntoServiceFn<Src, S>>> }, I, Gk, Ak, J>
+//    error?: TransitionPart<C, { type: 'error'; error: Error }, I, Gk, Ak, J>
+//  },
+//) {
+//  return [
+//    InvokeSymbol,
+//    (() => null) as T_DefTypeRefluxer<C, E, I, Gk, Ak, J, unknown, S>,
+//    { src, ...preparation, ...completion } as T_HiddenImpl,
+//    null,
+//  ] as const // StDefItems, AttachJot
+//}
 
-type Actions<Ak extends string, C extends MContext, Ex extends EventBody, I, J> = OneOrMany<Ak | ActionFn<C, Ex, I, J>>
+
+type Actions<Ak extends string, C extends MContext, Ex extends EventBody, I, J> = OneOrMany<
+  Ak | ActionFn<C, Ex, I, J, unknown, unknown>
+>
 type Guards<Gk extends string, C extends MContext, Ex extends EventBody, I, J> = OneOrMany<
   Gk | GuardFn<C, Ex, I, J> | TypedGuardFn<C, Ex, I> | BuiltinGuard<Gk, C, Ex, I, J>
 >
-type Transition<C extends MContext, Ex extends EventBody, I, Gk extends string, Ak extends string, J> = {
+type TransitionPart<C extends MContext, Ex extends EventBody, I, Gk extends string, J> = {
   to?: StateName
   guard?: Guards<Gk, C, Ex, I, J>
-  actions?: Actions<Ak, C, Ex, I, J>
+  //actions?: Actions<A, C, Ex, I, J>
 }
-type Delay<C extends MContext, E extends EventBody, I, Gk extends string, Ak extends string, J> = Expand<
-  { after: number } & Transition<C, E, I, Gk, Ak, J>
->
+//type Delay<C extends MContext, E extends EventBody, I, Gk extends string, Ak extends string, J> = Expand<
+//  { after: number } & TransitionPart<C, E, I, Gk, Ak, J>
+//>
 
-function o_normalizeTransitions(transitions: Transition<any, any, any, any, any, any>[]) {
+function o_normalizeTransitions(
+  transitions: (TransitionPart<any, any, any, any, any> & { actions: Actions<any, any, any, any, any> })[],
+) {
   return transitions.map(({ actions, guard, ...rest }) => ({
     actions: ensureArray(actions),
     guards: ensureArray(guard),
@@ -433,34 +953,34 @@ function o_normalizeTransitions(transitions: Transition<any, any, any, any, any,
   }))
 }
 
-function parseStDefEntries(entries: typeof ark.StDefEntries.infer, stateName: string) {
+function parseStDefItems(items: typeof ark.StDefItems.infer, stateName: string) {
   let { def, sub } = getNormalizedStDefTemplate()
-  if (!entries?.length) {
-    def.final = !entries
+  if (!items?.length) {
+    def.final = !items
     return { def, sub }
   }
 
-  for (const [i, entry] of entries.entries()) {
-    if (!Array.isArray(entry)) {
-      if ('tags' in entry) {
-        def.tags = new Set(entry.tags)
+  for (const [i, item] of items.entries()) {
+    if (!Array.isArray(item)) {
+      if ('tags' in item) {
+        def.tags = new Set(item.tags)
       }
-      if ('entry' in entry) {
-        def.entry = ensureArray(entry.entry)
-      }
-      if ('exit' in entry) {
-        def.exit = ensureArray(entry.exit)
-      }
-      if ('final' in entry) {
-        def.final = !!entry.final
+      //if ('entry' in item) {
+      //  def.entry = ensureArray(item.entry)
+      //}
+      //if ('exit' in item) {
+      //  def.exit = ensureArray(item.exit)
+      //}
+      if ('final' in item) {
+        def.final = !!item.final
       }
       continue
     }
 
-    switch (typeof entry?.[0]) {
+    switch (typeof item?.[0]) {
       case 'string': {
         // on(...)
-        const [eType, _, transitions] = entry
+        const [eType, _, transitions] = item
         if (eType in def.events || eType in def.builtinEvents) {
           throw new Error(`Duplicate event definition for event "${eType}", at "${stateName}"[${i}]`)
         }
@@ -480,7 +1000,7 @@ function parseStDefEntries(entries: typeof ark.StDefEntries.infer, stateName: st
         break
       }
       case 'function': {
-        const subStDict = entry[1] as Exclude<(typeof entry)[1], (...args: any[]) => unknown>
+        const subStDict = item[1] as Exclude<(typeof item)[1], (...args: any[]) => unknown>
         if (sub) {
           throw new Error(
             `Duplicated subStates: at "${stateName}"[${i}] { ${Object.keys(subStDict?.states || subStDict?.regions)
@@ -492,9 +1012,9 @@ function parseStDefEntries(entries: typeof ark.StDefEntries.infer, stateName: st
         break
       }
       case 'symbol': {
-        switch (entry[0]) {
+        switch (item[0]) {
           case InvokeSymbol: {
-            const { done, error, ...rest } = entry[2]
+            const { done, error, ...rest } = item[2]
             const nInvocation = {
               done: o_normalizeTransitions(ensureArray(done)),
               error: o_normalizeTransitions(ensureArray(error)),
@@ -503,13 +1023,27 @@ function parseStDefEntries(entries: typeof ark.StDefEntries.infer, stateName: st
             def.invocations.push(nInvocation)
             break
           }
+          case EntrySymbol: {
+            if (def.entry) {
+              throw new Error(`Duplicate entry definition at "${stateName}"[${i}]`)
+            }
+            def.entry = ensureArray(item[2])
+            break
+          }
+          case ExitSymbol: {
+            if (def.entry) {
+              throw new Error(`Duplicate exit definition at "${stateName}"[${i}]`)
+            }
+            def.exit = ensureArray(item[2])
+            break
+          }
           default:
             break
         }
         break
       }
       default:
-        throw new Error(`unexpected array[0] type: ${JSON.stringify(entry?.[0])}`)
+        throw new Error(`unexpected array[0] type: ${JSON.stringify(item?.[0])}`)
     }
   }
   return { def, sub }
@@ -520,17 +1054,17 @@ function normalizeStates<
   const E extends EventBody,
   const I,
   const Gk extends string,
-  const Ak extends string,
-  const D extends { [K in string]: StateDefinition<C, E, I, Gk, Ak, any, any, any, any> },
+  const A extends ActionRecord<C, E, I>,
+  const D extends { [K in string]: StateDefinition<C, E, I, Gk, A, any, any, any, any> },
 >(stateDefOf: D) {
   return Object.entries(stateDefOf).reduce(
     (acc, [stateName, stDefs]: [keyof D & string, unknown]) => {
       if (stateName.includes('/')) {
         throw new Error(`State names cannot contain the character "/": "${stateName}"`)
       } else if (Array.isArray(stDefs) || stDefs == null) {
-        const [_, jot, entries] =
-          stDefs?.[0] === JotSymbol ? ark.JotAttached.assert(stDefs) : [false, null, ark.StDefEntries.assert(stDefs)]
-        const { def, sub } = parseStDefEntries(entries, stateName)
+        const [_, jot, items] =
+          stDefs?.[0] === JotSymbol ? ark.JotAttached.assert(stDefs) : [false, null, ark.StDefItems.assert(stDefs)]
+        const { def, sub } = parseStDefItems(items, stateName)
         acc[stateName] = {
           def: { ...def, deriveJot: !jot ? null : typeof jot === 'function' ? jot : () => structuredClone(jot) },
           sub,
@@ -556,10 +1090,10 @@ function transformNormalizedDefinition<
   const E extends EventBody,
   const I,
   const Gk extends string,
-  const Ak extends string,
+  const A extends ActionRecord<C, E, I>,
 >() {
   return <
-    const D extends Record<string, StateDefinition<C, E, I, Gk, Ak, any, any, any, any>>,
+    const D extends Record<string, StateDefinition<C, E, I, Gk, A, any, any, any, any>>,
     const Initial extends string | undefined,
   >(
     stateDefOf: D,
@@ -575,7 +1109,7 @@ function transformNormalizedDefinition<
     ) as Initial extends string ? Initial : string
     return {
       initial,
-      states: normalizeStates<C, E, I, Gk, Ak, D>(stateDefOf),
+      states: normalizeStates<C, E, I, Gk, A, D>(stateDefOf),
     }
   }
 }
@@ -584,16 +1118,16 @@ function transformParallelNormalizedDefinition<
   const E extends EventBody,
   const I,
   const Gk extends string,
-  const Ak extends string,
+  const A extends ActionRecord<C, E, I>,
   J,
 >() {
   return <
     const PD extends {
       [K in string]:
-      | [{ [L in string]: StateDefinition<C, E, I, Gk, Ak, any, any, any, any> }]
+      | [{ [L in string]: StateDefinition<C, E, I, Gk, A, any, any, any, any> }]
       | [
-        Array<RegionStDefEntry<C, E, I, Gk, Ak, J>>,
-        { [L in string]: StateDefinition<C, E, I, Gk, Ak, any, any, any, any> },
+        Array<RegionStDefItem<C, E, I, Gk, A, J>>,
+        { [L in string]: StateDefinition<C, E, I, Gk, A, any, any, any, any> },
       ]
       | []
     },
@@ -605,17 +1139,17 @@ function transformParallelNormalizedDefinition<
         if (regionName.includes('/')) {
           throw new Error(`Parallel region state names cannot contain the character "/": "${regionName}"`)
         }
-        const [leafDefOf = {}, regionStDefEntries]: [
-          Record<string, StateDefinition<C, E, I, Gk, Ak, any, any, any, any>>,
-          Array<RegionStDefEntry<C, E, I, Gk, Ak, J>> | undefined,
+        const [leafDefOf = {}, regionStDefItems]: [
+          Record<string, StateDefinition<C, E, I, Gk, A, any, any, any, any>>,
+          Array<RegionStDefItem<C, E, I, Gk, A, J>> | undefined,
         ] = [rawDefinition[rawDefinition.length - 1], rawDefinition[rawDefinition.length - 2]] as any
 
-        const { def } = parseStDefEntries(regionStDefEntries || [], regionName)
+        const { def } = parseStDefItems(regionStDefItems || [], regionName)
         return [
           regionName,
           {
             def,
-            sub: transformNormalizedDefinition<C, E, I, Gk, Ak>()(leafDefOf, undefined),
+            sub: transformNormalizedDefinition<C, E, I, Gk, A>()(leafDefOf, undefined),
           },
         ]
       }),
@@ -688,9 +1222,13 @@ function o_validateTransition(stateCatalog: Map<string, NormalizedStateItem>) {
   })
 }
 
-type O_GlobalEvents<C extends MContext, E extends EventBody, I, Gk extends string, Ak extends string> = Array<
-  readonly [E['type'] | BuiltinEType, T_DefTypeRefluxer<C, E, I, Gk, Ak, undefined, undefined>, T_HiddenImpl]
->
+type O_GlobalEvents<
+  C extends MContext,
+  E extends EventBody,
+  I,
+  Gk extends string,
+  A extends ActionRecord<C, E, I>,
+> = Array<readonly [E['type'] | BuiltinEType, T_DefTypeRefluxer<C, E, I, Gk, A, undefined, undefined>, T_HiddenImpl]>
 function getDefinitionAndCatalog<
   C extends MContext,
   const E extends EventBody,
@@ -700,35 +1238,36 @@ function getDefinitionAndCatalog<
   const G extends GuardRecord<C, E, I>,
   const A extends ActionRecord<C, E, I>,
   const S extends Record<string, (input: any) => unknown>,
-  const D extends { [K in string]: StateDefinition<C, E, I, Gk, Ak, Jd[K], unknown, unknown, S> },
+  const D extends { [K in string]: StateDefinition<C, E, I, Gk, A, Jd[K], unknown, unknown, S> },
   Jd extends { [K in keyof D]: unknown },
   Gk extends keyof G & string = keyof G & string,
-  Ak extends keyof A & string = keyof A & string,
 >(
   config: MachineConfig<C, E, EM, I, O, G, A, S>,
   defineStates: (
     define: Expand<
       T_DefineStatesParamPart & { guards: NonNullable<G>; actions: NonNullable<A>; services: NonNullable<S> }
     >,
-  ) => readonly [O_GlobalEvents<C, E, I, Gk, Ak>, D] | readonly [D] | D,
+  ) => readonly [O_GlobalEvents<C, E, I, Gk, A>, D] | readonly [D] | D,
 ) {
   const { guards, actions, services } = config
   const rawDefinition = defineStates({
+    entry,
+    exit,
     on,
     AttachJot,
     subStates,
     parallel,
-    invoke,
+    //invoke,
     guards: guards!,
     actions: actions!,
     services: services!,
   })
 
-  const [stateDefDict, globalEvents]: [D, O_GlobalEvents<C, E, I, Gk, Ak> | undefined] = Array.isArray(rawDefinition)
+  const [stateDefDict, globalEvents]: [D, O_GlobalEvents<C, E, I, Gk, A> | undefined] = Array.isArray(rawDefinition)
     ? ([rawDefinition[rawDefinition.length - 1], rawDefinition[rawDefinition.length - 2]] as const)
     : ([rawDefinition, []] as const)
 
-  const { initial, states } = transformNormalizedDefinition<C, E, I, keyof G & string, keyof A & string>()(
+  const { initial, states } = transformNormalizedDefinition<C, E, I, keyof G & string, A>()(
     stateDefDict,
     config.initialState,
   )
@@ -741,7 +1280,7 @@ function getDefinitionAndCatalog<
 
   const {
     def: { events, builtinEvents },
-  } = parseStDefEntries(globalEvents || [], '(root)')
+  } = parseStDefItems(globalEvents || [], '(root)')
   return { definition: { initial, events, builtinEvents, states }, stateCatalog }
 }
 
@@ -755,7 +1294,7 @@ export function createMachine<
   const A extends ActionRecord<C, E, I>,
   const S extends Record<string, (input: any) => unknown>,
   const D extends {
-    [K in string]: StateDefinition<C, E, I, keyof G & string, keyof A & string, Jd[K], unknown, unknown, S>
+    [K in string]: StateDefinition<C, E, I, keyof G & string, A, Jd[K], unknown, unknown, S>
   },
   Jd extends { [K in keyof D]: unknown },
 >(

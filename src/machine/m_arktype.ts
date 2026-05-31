@@ -56,12 +56,12 @@ const o_SubStatesNormalized = type([AnyFn, SubStNormalizedDefinition]).readonly(
 const o_StDefMetaEntry = type({
   '+': 'reject',
   'tags?': '(string > 0)[]',
-  'entry?': AnyFn.or(AnyFn.array()),
-  'exit?': AnyFn.or(AnyFn.array()),
+  //'entry?': AnyFn.or(AnyFn.array()),
+  //'exit?': AnyFn.or(AnyFn.array()),
   'final?': 'boolean',
 })
 
-export const StDefEntries = type.or(o_SubStatesNormalized, o_StateEvent, o_StDefMetaEntry).array().or('null')
+export const StDefItems = type.or(o_SubStatesNormalized, o_StateEvent, o_StDefMetaEntry).array().or('null')
 //export const RegionStDefEntries = type.or(o_StateEvent, o_StDefMetaEntry).array().or('undefined')
-export const JotAttached = type([type.unit(JotSymbol), 'unknown', StDefEntries]).readonly()
+export const JotAttached = type([type.unit(JotSymbol), 'unknown', StDefItems]).readonly()
 
