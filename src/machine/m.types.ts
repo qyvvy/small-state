@@ -1,4 +1,4 @@
-import type { AnyFn, Expand } from './m.general.types'
+import type { AnyFn, Duplicate, Expand, Placeholder } from './m.general.types'
 
 export type ExtractEvent<E extends EventBody, Et extends E['type']> =
   Et extends BuiltinEType ? E : E extends { type: Et } ? E : Et extends E['type'] ? E : never
@@ -28,18 +28,40 @@ export type EventBody = { type: string;[key: string]: any }
 export type EmittedEvent = { type: string;[key: string]: any }
 export type StateName = string
 
-export type FnBaseParams<C extends MContext, Ex extends EventBody, I, J, Ri = unknown> = [
-  arg: { c: C; context: C; e: Ex; event: Ex; input: I; jot: J; relayed: Ri },
+export type FnBaseParams<C extends MContext, Ex extends EventBody, I, J, Additional = unknown> = [
+  arg: Expand<{ c: C; context: C; e: Ex; event: Ex; input: I; jot: J } & Additional>,
+  params?: any
 ]
 export type JotParams<C extends MContext, E extends EventBody, I, Jp> = Expand<
   Omit<FnBaseParams<C, E, I, Jp>[0], 'e' | 'event' | 'relayed'>
 >
 
-export type FnBase<out Ro, in C extends MContext, in Ex extends EventBody, in I, in J, Ri = unknown> = (
-  ...args: FnBaseParams<C, Ex, I, J, Awaited<Ri>>
-) => Ro
-export type GuardFn<in C extends MContext, Ex extends EventBody, I, J> = FnBase<boolean, C, Ex, I, J>
-export type ActionFn<in C extends MContext, Ex extends EventBody, I, J, Ri, Ro> = FnBase<Ro, C, Ex, I, J, Ri>
+type O_AssignmentObj<C extends MContext, Ex extends EventBody, I, J, Ri, Cx = Duplicate<C>> = {
+  [K in keyof Cx]?: Cx[K] | ActionFn<C, Ex, I, J, Ri, Cx[K] | Promise<Cx[K]>>
+}
+type O_AssignmentFn<C extends MContext, Ex extends EventBody, I, J, Ri> =
+  ActionFn<C, Ex, I, J, Ri, Partial<C> | Promise<Partial<C>>>
+export type Assigner<C extends MContext, Ex extends EventBody, I, J, Ri> = {
+  assign: O_AssignmentObj<C, Ex, I, J, Ri> | O_AssignmentFn<C, Ex, I, J, Ri>
+}
+
+export type FnDescriptor = {
+  type: string
+  ret: unknown
+  params?: Placeholder
+}
+
+
+//export type FnBase<out Ro, in C extends MContext, in Ex extends EventBody, in I, in J, Ri = unknown> = (
+//  ...args: FnBaseParams<C, Ex, I, J, Awaited<Ri>>
+//) => Ro
+//export type GuardFn<in C extends MContext, Ex extends EventBody, I, J, P> = FnBase<boolean, C, Ex, I, J, P>
+export type GuardFn<in C extends MContext, Ex extends EventBody, I, J> =
+  (...args: FnBaseParams<C, Ex, I, J>) => boolean
+//export type ActionFn<in C extends MContext, Ex extends EventBody, I, J, Ri, Ro, P> = FnBase<Ro, C, Ex, I, J, P, Ri>
+export type ActionFn<C extends MContext, Ex extends EventBody, I, J, Ri, Ro> =
+  //(...args: FnBaseParams<C, Ex, I, J, { relayed: Awaited<Ri> }>) => Ro
+  (...args: FnBaseParams<C, Ex, I, J, { relayed: Awaited<Ri> }>) => Ro
 
 
 export type TypedGuardFn<in C extends MContext, in out E extends EventBody, in I> = Expand<
@@ -49,10 +71,11 @@ export type TypedGuardFn<in C extends MContext, in out E extends EventBody, in I
   : never
   : never
 >
-export type GuardRecord<in C extends MContext, in out E extends EventBody, in I> = Record<
-  string,
-  GuardFn<C, E, I, unknown> | TypedGuardFn<C, E, I>
->
+//export type GuardRecord<in C extends MContext, in out E extends EventBody, in I> = Record<
+//  string,
+//  GuardFn<C, E, I, unknown> | TypedGuardFn<C, E, I>
+//>
+export type GuardRecord<in C extends MContext, in out E extends EventBody, in I> = Record<string, GuardFn<C, E, I, unknown>>
 
 // TODO: assign が動かなくなるので使用をやめている
 //export type TypedActionFn<in C extends MContext, in out E extends EventBody, in I> = Expand<
@@ -62,10 +85,13 @@ export type GuardRecord<in C extends MContext, in out E extends EventBody, in I>
 //  : never
 //  : never
 //>
-export type ActionRecord<in C extends MContext, in out E extends EventBody, in I> = Record<
+export type ActionRecord<C extends MContext, in out E extends EventBody, in I> = Record<
   string,
-  ActionFn<C, E, I, unknown, unknown, unknown>
+  ActionFn<C, E, I, unknown, unknown, unknown> | Assigner<C, E, I, unknown, unknown>
 >
+type ExtractActionRecord<C extends MContext, E extends EventBody, I, A extends ActionRecord<C, E, I>, Et extends E['type'] | BuiltinEType> =
+  A
+
 //export type ServiceRecord<A, R> = Record<string, (...arg: A) => R>
 //export type Service<A extends any[], R> = (...arg: A) => R
 
@@ -78,7 +104,7 @@ export type NormalizedInvocation = {
   error?: NormalizedTransition[]
 }
 
-type O_NormalizedEffectFunc = Array<AnyFn | string | { eType: string; fn: AnyFn }>
+type O_NormalizedEffectFunc = Array<AnyFn | string | { type: string, params?: any } | { eType: string; fn: AnyFn }>
 export type NormalizedTransition = {
   to?: StateName
   actions: O_NormalizedEffectFunc
@@ -89,8 +115,8 @@ export type NormalizedStItemDef<J, Et extends string> = {
   final: boolean
   deriveJot: null | AnyFn<J>
   tags: Set<string>
-  entry: AnyFn[] | null
-  exit: AnyFn[] | null
+  entryHooks: AnyFn[] | null
+  exitHooks: AnyFn[] | null
   //always: O_NormalizedTransition[]
   //delays: Array<O_NormalizedTransition & { after: number }>
   invocations: Array<NormalizedInvocation>
@@ -118,6 +144,7 @@ export type MachineConfig<
   EM extends EmittedEvent,
   I,
   O,
+  //G extends GuardRecord<C, E, I>,
   G extends GuardRecord<C, E, I>,
   A extends ActionRecord<C, E, I>,
   S
@@ -127,8 +154,8 @@ export type MachineConfig<
   initialState?: StateName
   initContext?: (input: I) => C
   output?: (arg: Omit<FnBaseParams<C, E, I, unknown>[0], 'jot'>) => O // マシンが最終状態になったときに実行される
-  guards?: G
-  actions?: A
+  guards?: G,
+  actions?: A,
   services?: S
 }
 

@@ -5,7 +5,10 @@ export type AnyFn<R = unknown> = R extends any ? (...arg: any[]) => R : never
 export type IsUnknown<T> = unknown extends T ? ([T] extends [unknown] ? true : false) : false
 export type Fallback<T, U> = T extends never ? U : T
 export type LowInfer<T> = T & NonNullable<unknown>;
-
+export type Placeholder = {} | null | undefined // 何でも入り後から捕捉できる型
+export type Values<T> = T[keyof T]
+export type Duplicate<T> = T extends infer Tx ? Tx : never
+export type IsAny<T> = 0 extends (1 & T) ? true : false;
 
 
 
