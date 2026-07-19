@@ -1,19 +1,30 @@
 import { type } from 'arktype'
 import { BUILTIN_ETYPES } from '../m.types'
-import { AnyFn, EffectFuncs } from "./arktype.internal";
+import { AnyFn } from "./arktype.internal";
+
+const NormalizedActionBody = type({ type: '"function"|"string"|"enqueue"', body: type.or(AnyFn, 'string'), 'params?': 'unknown' })
 
 const o_NormalizedTransitions = type({
   'to?': 'string',
-  actions: EffectFuncs,
-  guards: EffectFuncs,
+  'fullTo?': 'string',
+  actions: NormalizedActionBody.array(),
+  guards: NormalizedActionBody.array(),
 }).array()
-const NormalizedStItemDef = type({
+const o_NormalizedInvocations = type({
+  'id?': 'string',
+  'input?': AnyFn,
+  src: type.or(AnyFn, 'string'),
+  'done?': o_NormalizedTransitions,
+  'error?': o_NormalizedTransitions,
+}).array()
+const NStateItemDef = type({
+  '+': 'reject',
   pPath: 'string',
   final: 'boolean',
-  deriveJot: AnyFn.or('null'),
   tags: 'Set',
-  entryHooks: AnyFn.array().or('null'),
-  exitHooks: AnyFn.array().or('null'),
+  invocations: o_NormalizedInvocations,
+  entryHook: NormalizedActionBody.or('null'),
+  exitHook: NormalizedActionBody.or('null'),
   builtinEvents: BUILTIN_ETYPES.reduce(
     (acc, et) => {
       acc[`${et}?`] = o_NormalizedTransitions
@@ -28,7 +39,7 @@ export const SubStNormalizedDefinition = type([{
   initial: 'string | undefined',
   states: {
     '[string]': {
-      def: NormalizedStItemDef,
+      def: NStateItemDef,
       sub: 'null | this',
     },
   },
@@ -36,7 +47,7 @@ export const SubStNormalizedDefinition = type([{
   nType: '"parallel"',
   regions: {
     '[string]': {
-      def: NormalizedStItemDef,
+      def: NStateItemDef,
       sub: 'null | this',
     },
   },

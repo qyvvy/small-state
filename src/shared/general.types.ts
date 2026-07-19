@@ -1,7 +1,7 @@
 export type Expand<T> = { [K in keyof T]: T[K] } & {}
 export type One<T> = T | [T]
 export type OneOrMany<T> = T | T[]
-export type AnyFn<R = unknown> = R extends any ? (...arg: any[]) => R : never
+export type AnyFn<R = unknown> = (...arg: any[]) => R
 export type IsUnknown<T> = unknown extends T ? ([T] extends [unknown] ? true : false) : false
 export type Fallback<T, U> = T extends never ? U : T
 export type LowInfer<T> = T & NonNullable<unknown>;
@@ -9,6 +9,8 @@ export type Placeholder = {} | null | undefined // 何でも入り後から捕�
 export type Values<T> = T[keyof T]
 export type Duplicate<T> = T extends infer Tx ? Tx : never
 export type IsAny<T> = 0 extends (1 & T) ? true : false;
+export type NestedArray<T> = (T | NestedArray<T>)[]
+export type RecursiveRecord = { [key: string]: RecursiveRecord };
 
 
 
