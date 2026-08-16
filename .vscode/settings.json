@@ -1,0 +1,15 @@
+{
+  "files.eol": "\n",
+  "editor.defaultFormatter": "biomejs.biome",
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll.biome": "explicit",
+    "source.organizeImports.biome": "explicit"
+  },
+  "cSpell.words": ["biome", "cdate", "refluxer", "arktype", "macrostep", "microstep", "microsteps"],
+  "cSpell.minWordLength": 5,
+  "cSpell.ignoreRegExpList": [
+    "/\\b.*?ees?\\b/",
+    "/\\bcrr.*?\\b/"
+  ]
+}

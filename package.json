@@ -1,0 +1,31 @@
+{
+  "name": "min-state",
+  "version": "0.1.0",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "dependencies": {
+    "arktype": "^2.2.0",
+    "cdate": "^0.0.7"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.14",
+    "@types/bun": "^1.3.11",
+    "tsdown": "^0.18.4",
+    "typescript": "5.8"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "compile": "tsdown src/index.ts --format esm,cjs --dts",
+    "type-pred": "type-predicates-generator -f '**/*.target.types.ts' -o src/__generated__/type-predicates.ts -a"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "types": "./dist/index.d.ts"
+}

@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    // Environment setup & latest features
+    "lib": ["ES2022"],
+    "target": "ES2022",
+    "module": "Preserve",
+    "moduleDetection": "force",
+    "jsx": "react-jsx",
+    // 追加分
+    "types": ["@types/bun"],
+    "useDefineForClassFields": true, // クラスフィールドを正しく出力する
+
+    // Bundler mode
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true, // "./foo.ts" 拡張子付きインポートを有効
+    "verbatimModuleSyntax": true, // import における複雑な挙動を排する
+    "noEmit": true, // .js を出力せず型チェックのみ行う
+
+    // Best practices
+    "strict": true,
+    "skipLibCheck": true, // d.ts と node_modules の型チェックをスキップ
+    "noFallthroughCasesInSwitch": true, // switch 文の break をチェック
+    "noUncheckedIndexedAccess": true, // 配列やオブジェクトのインデックスアクセスに undefined になる可能性を考慮
+    "noImplicitOverride": true, // override 時 override キーワードを必須化
+
+    // Some stricter flags (disabled by default)
+    "noUnusedLocals": false, // 使われていない変数を許さない
+    "noUnusedParameters": false,
+    "noPropertyAccessFromIndexSignature": false, // インデックス型プロパティを持つオブジェクトはブラケットでアクセスしなければいけない
+
+    "noErrorTruncation": true, // 型ホバー表示を増やす
+  },
+}

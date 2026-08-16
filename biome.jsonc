@@ -1,0 +1,61 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "files": {
+    "includes": ["**/src/**", "!**/dist"]
+  },
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
+  "formatter": {
+    "indentStyle": "space",
+    "lineWidth": 120
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "suspicious": {
+        "noBitwiseOperators": "warn", // `|` や `&` などのビット演算子を禁止
+        "noAssignInExpressions": "warn", // 式中での代入禁止
+        "noExplicitAny": "off", // any タイプ使用禁止
+        "noDoubleEquals": "off",
+        "noArrayIndexKey": "warn", // jsx の key に配列の index を使うのを禁止
+        "useIterableCallbackReturn": {
+          "level": "on",
+          "options": {
+            "checkForEach": false // forEach のコールバックの戻り値をチェックするかどうか
+          }
+        }
+      },
+      "style": {
+        "noNonNullAssertion": "off", // !. の禁止
+        "useNumberNamespace": "warn",
+        "noUnusedTemplateLiteral": "off", // 不必要な `example` (バッククォート)文字列の禁止
+        "noUselessElse": "off",
+        "noInferrableTypes": "off", // 推測可能な変数に型を宣言するのを禁止
+        "noParameterAssign": "warn",
+        "useSingleVarDeclarator": "off", // 1つの変数宣言で複数の変数を定義するのを禁止
+        "useImportType": "warn",
+        "useConst": "warn",
+        //"useConsistentObjectDefinitions": "error", // {foo: foo} を {foo} にする: NOTE: 動かない
+        "useSelfClosingElements": "off" // <div></div> は <div /> にする
+      },
+      "a11y": {
+        "noStaticElementInteractions": "off", // <div> などに role をつけることを強制
+        "useAltText": "off" // <img> タグに alt 属性をつけることを強制
+      },
+      "correctness": {
+        "useExhaustiveDependencies": "warn", // React フックをクロージャーにしない
+        "noUnusedFunctionParameters": "off",
+        "noUnusedImports": "off"
+      },
+      "complexity": {
+        "noUselessLoneBlockStatements": "warn"
+      }
+    }
+  },
+  "javascript": {
+    "formatter": {
+      "semicolons": "asNeeded",
+      "quoteStyle": "single"
+    }
+  }
+}
