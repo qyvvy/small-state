@@ -1,5 +1,8 @@
 import type { Placeholder } from '../shared/general.types'
 import type {
+  UpdateFn,
+  UpdateFnParam,
+  EmittedEvent,
   EventBody,
   FnBaseParams,
   MContext,
@@ -11,6 +14,7 @@ export type EnqueueActions<
   C extends MContext,
   Ex extends EventBody,
   I,
+  EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
 > = (
@@ -18,32 +22,51 @@ export type EnqueueActions<
     C,
     Ex,
     I,
-    { check: Check<C, Ex, I, G>; enqueue: Enqueue<C, Ex, I, A>; update: typeof enqueueUpdate<C, Ex, I, A> }
+    {
+      check: CheckFn<C, Ex, I, G>
+      enqueue: EnqueueFn<C, Ex, I, EM, A>
+      update: UpdateFn<C>
+      emit: (emittedEvent: EM) => unknown
+    }
   >[0],
 ) => unknown
 
-type Check<C extends MContext, Ex extends EventBody, I, G extends Record<string, Placeholder>> = <
-  Gk extends keyof G | never,
->(
-  type: Gk,
-  ...args: ParamsArgOf<G, Gk, C, Ex, I>
-) => boolean
+export type CheckFn<
+  C extends MContext, Ex extends EventBody, I, G extends Record<string, Placeholder>
+> = < Gk extends keyof G & string | never >(type: Gk, ...args: ParamsArgOf<G, Gk, C, Ex, I>) => boolean
+//export type check<Gk extends (keyof G & string) | never>(type: Gk, ...args: ParamsArgOf<G, Gk, C, Ex, I>): boolean
 
-type Enqueue<C extends MContext, Ex extends EventBody, I, A extends Record<string, Placeholder>> = {
-  update: typeof enqueueUpdate<C, Ex, I, A>
+export type EnqueueFn<
+  C extends MContext, Ex extends EventBody, I, EM extends EmittedEvent, A extends Record<string, Placeholder>
+> = {
+  //update: typeof enqueueUpdate<C, Ex, I, EM, A>
+  //update: UpdateFn<C>
   <Ak extends keyof A | never>(
     type: Ak,
     ...args: ParamsArgOf<A, Ak, C, Ex, I>
-  ): { enqueue: Enqueue<C, Ex, I, A>; update: typeof enqueueUpdate<C, Ex, I, A> }
+  ): void
   (
-    fn: (...args: FnBaseParams<C, Ex, I, { update: typeof enqueueUpdate<C, Ex, I, A> }>) => unknown,
-  ): { enqueue: Enqueue<C, Ex, I, A>; update: typeof enqueueUpdate<C, Ex, I, A> }
+    fn: (...args: FnBaseParams<C, Ex, I, {
+      emit: (emittedEvent: EM) => unknown
+      update: typeof enqueueUpdate<C, Ex, I, EM, A>
+    }>) => unknown,
+  ): void
 }
 
-function enqueueUpdate<C extends MContext, Ex extends EventBody, I, A extends Record<string, Placeholder>>(
-  updates: {
-    [K in keyof C]?: C[K] | Promise<C[K]> | (() => C[K] | Promise<C[K]>)
-  },
-): { enqueue: Enqueue<C, Ex, I, A>; update: typeof enqueueUpdate<C, Ex, I, A> } {
-  return null as unknown as { enqueue: Enqueue<C, Ex, I, A>; update: typeof enqueueUpdate<C, Ex, I, A> }
+
+type EnqueueUpdateFn<
+  C extends MContext, Ex extends EventBody, I, EM extends EmittedEvent, A extends Record<string, Placeholder>
+> = (updates: UpdateFnParam<C>) => {
+  enqueue: EnqueueFn<C, Ex, I, EM, A>;
+  update: typeof enqueueUpdate<C, Ex, I, EM, A>;
+}
+
+function enqueueUpdate<
+  C extends MContext,
+  Ex extends EventBody,
+  I,
+  EM extends EmittedEvent,
+  A extends Record<string, Placeholder>
+>(updates: UpdateFnParam<C>): { enqueue: EnqueueFn<C, Ex, I, EM, A>; update: typeof enqueueUpdate<C, Ex, I, EM, A> } {
+  return null as unknown as { enqueue: EnqueueFn<C, Ex, I, EM, A>; update: typeof enqueueUpdate<C, Ex, I, EM, A> }
 }

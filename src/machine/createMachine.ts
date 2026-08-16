@@ -1,7 +1,7 @@
 import { type as arkType } from 'arktype'
 import { ST_DELIM } from '../shared/constants'
 import type { AnyFn, Expand, IsAny, One, OneOrMany, Placeholder, Values } from '../shared/general.types'
-import { assertOrThrow, deepFreeze, ensureArray, randomString } from '../shared/utils'
+import { assertOrThrow, deepFreeze, ensureArray, hasOwnProperty, parentPathOf, randomString } from '../shared/utils'
 import * as ark_m_config from './arktype/ark_m_config'
 import type * as ark_normalized from './arktype/ark_normalized'
 import * as ark_stdef from './arktype/ark_stdef'
@@ -19,9 +19,11 @@ import type {
   NormalizedDefinition,
   NormalizedInvocation,
   NormalizedStateItem,
+  NormalizedStateItemBoth,
   NormalizedTransition,
   NStateItemDef,
   ParallelNormalizedDefinition,
+  ParallelNormalizedStateItem,
   ParamsArgOf,
   StateName,
 } from './m.types'
@@ -39,6 +41,7 @@ type X_DefTypeRefluxer<
   C extends MContext,
   E extends EventBody,
   I, // Input
+  EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends Record<string, (input: any) => unknown> = Record<string, (input: any) => unknown>, // Services
@@ -78,24 +81,22 @@ type O_OneAction<
   C extends MContext,
   E extends EventBody,
   I,
+  EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
-> = Array<
-  | GuardReturn<C, E, I, G>
-  | ActionReturn<C, E, I, A>
-  | EnqueueActions<C, E, I, G, A>
->
+> = Array<GuardReturn<C, E, I, G> | ActionReturn<C, E, I, EM, A> | EnqueueActions<C, E, I, EM, G, A>>
 
 type StDefMetaInfo<
-  in out C extends MContext,
-  in out E extends EventBody,
-  in out I,
+  C extends MContext,
+  E extends EventBody,
+  I,
+  EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
 > = {
   tags?: string[]
-  entryHook?: EnqueueActions<C, E, I, G, A> | O_OneAction<C, E, I, G, A>
-  exitHook?: EnqueueActions<C, E, I, G, A> | O_OneAction<C, E, I, G, A>
+  entryHook?: EnqueueActions<C, E, I, EM, G, A> | O_OneAction<C, E, I, EM, G, A>
+  exitHook?: EnqueueActions<C, E, I, EM, G, A> | O_OneAction<C, E, I, EM, G, A>
   isFinal?: boolean
 }
 
@@ -103,30 +104,30 @@ type StDefCoreItem<
   C extends MContext,
   E extends EventBody,
   I,
+  EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
-> =
-  | StDefMetaInfo<C, E, I, G, A>
-  | readonly [E['type'] | BuiltinEType, X_DefTypeRefluxer<C, E, I, G, A>, X_HiddenImpl] // on
+> = StDefMetaInfo<C, E, I, EM, G, A> | readonly [E['type'] | BuiltinEType, X_DefTypeRefluxer<C, E, I, EM, G, A>, X_HiddenImpl] // on
 
 type StateDefinition<
   C extends MContext,
   E extends EventBody,
   I,
+  EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends Record<string, (input: any) => unknown>,
 > = null | Array<
-  | StDefCoreItem<C, E, I, G, A>
-  | readonly [X_DefTypeRefluxer<C, E, I, G, A, S, any>, unknown] // subStates|parallel
-  | readonly [typeof InvokeSymbol, X_DefTypeRefluxer<C, E, I, G, A, S>, null, unknown, any, any] // invoke
+  | StDefCoreItem<C, E, I, EM, G, A>
+  | readonly [X_DefTypeRefluxer<C, E, I, EM, G, A, S, any>, unknown] // subStates|parallel
+  | readonly [typeof InvokeSymbol, X_DefTypeRefluxer<C, E, I, EM, G, A, S>, null, unknown, any, any] // invoke
 >
 
 type GuardReturn<C extends MContext, Ex extends EventBody, I, G extends Record<string, Placeholder>> = readonly [
   typeof TransitionSymbol,
   'guards',
   X_HiddenImpl,
-  X_DefTypeRefluxer<C, Ex, I, G, any>,
+  X_DefTypeRefluxer<C, Ex, I, any, G, any>,
 ]
 
 function Guard<
@@ -139,16 +140,16 @@ function Guard<
   return [
     TransitionSymbol,
     'guards',
-    { type: typeof body, body, ...(args.length ? { params: args[0] } : {}) },
-    (() => null) as X_DefTypeRefluxer<C, Ex, I, G, any>,
+    { body, ...(args.length ? { params: args[0] } : {}) },
+    (() => null) as X_DefTypeRefluxer<C, Ex, I, any, G, any>,
   ] as const // GuardReturn
 }
 
-type ActionReturn<C extends MContext, Ex extends EventBody, I, A extends Record<string, Placeholder>> = readonly [
+type ActionReturn<C extends MContext, Ex extends EventBody, I, EM extends EmittedEvent, A extends Record<string, Placeholder>> = readonly [
   typeof TransitionSymbol,
   'actions',
   X_HiddenImpl,
-  X_DefTypeRefluxer<C, Ex, I, any, A, any>,
+  X_DefTypeRefluxer<C, Ex, I, EM, any, A, any>,
   null,
 ]
 
@@ -156,14 +157,15 @@ function Action<
   C extends MContext,
   Ex extends EventBody,
   I,
+  EM extends EmittedEvent,
   A extends Record<string, Placeholder>,
   Ak extends keyof A | never,
->(body: Ak | ((arg: ActionFnParams<C, Ex, I, unknown>[0]) => unknown), ...args: ParamsArgOf<A, Ak, C, Ex, I>) {
+>(body: Ak | ((arg: ActionFnParams<C, Ex, I, EM, unknown>[0]) => unknown), ...args: ParamsArgOf<A, Ak, C, Ex, I>) {
   return [
     TransitionSymbol,
     'actions',
-    { type: typeof body, body, ...(args.length ? { params: args[0] } : {}) },
-    (() => null) as X_DefTypeRefluxer<C, Ex, I, any, A>,
+    { body, ...(args.length ? { params: args[0] } : {}) },
+    (() => null) as X_DefTypeRefluxer<C, Ex, I, EM, any, A>,
     null,
   ] as const // ActionReturn
 }
@@ -172,42 +174,45 @@ type Transition<
   C extends MContext,
   Ex extends EventBody,
   I,
+  EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
 > = Array<
   | StateName
   //| readonly [T_DefTypeRefluxer<C, Ex, I, G, any>, typeof GuardSymbol, T_HiddenImpl]
   | GuardReturn<C, Ex, I, G>
-  | ActionReturn<C, Ex, I, A>
-  | EnqueueActions<C, Ex, I, G, A>
+  | ActionReturn<C, Ex, I, EM, A>
+  | EnqueueActions<C, Ex, I, EM, G, A>
 >
 
 function on<
   C extends MContext,
   E extends EventBody,
   I,
+  EM extends EmittedEvent,
   const G extends Record<string, Placeholder>,
   const A extends Record<string, Placeholder>,
   Et extends [E] extends [never] ? string : E['type'] | BuiltinEType | never,
 >(
   eventType: Et,
-  ...transitions: [Transition<C, ExtractEvent<E, Et>, I, G, A>, ...Array<Transition<C, ExtractEvent<E, Et>, I, G, A>>]
+  ...transitions: [Transition<C, ExtractEvent<E, Et>, I, EM, G, A>, ...Array<Transition<C, ExtractEvent<E, Et>, I, EM, G, A>>]
 ) {
-  return [eventType, (() => null) as X_DefTypeRefluxer<C, E, I, G, A>, transitions as X_HiddenImpl] as const // StDefCoreItem
+  return [eventType, (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A>, transitions as X_HiddenImpl] as const // StDefCoreItem
 }
 
 function subStates<
   C extends MContext,
   E extends EventBody,
   I,
+  EM extends EmittedEvent,
   const G extends Record<string, Placeholder>,
   const A extends Record<string, Placeholder>,
   S extends Record<string, (input: any) => unknown>,
-  const D extends { [K in string]: StateDefinition<C, E, I, G, A, S> },
+  const D extends { [K in string]: StateDefinition<C, E, I, EM, G, A, S> },
   const Initial extends keyof D & string,
 >(stateDefinition: D, initialState?: Initial) {
   return [
-    (() => SubStatesSymbol) as X_DefTypeRefluxer<C, E, I, G, A, S, typeof SubStatesSymbol>,
+    (() => SubStatesSymbol) as X_DefTypeRefluxer<C, E, I, EM, G, A, S, typeof SubStatesSymbol>,
     transformNormalizedDefinition(stateDefinition, initialState) as {
       initial: [Initial] extends [never] ? undefined : Initial
       states: {
@@ -220,7 +225,7 @@ function subStates<
   ] as const // StateDefinition
 }
 
-type O_ExtractRegionEType<De> = De extends [infer U, Record<string, StateDefinition<any, any, any, any, any, any>>]
+type O_ExtractRegionEType<De> = De extends [infer U, Record<string, StateDefinition<any, any, any, any, any, any, any>>]
   ? U extends Array<infer El>
   ? El extends readonly [infer Et, AnyFn, any]
   ? Exclude<Et, BuiltinEType>
@@ -233,18 +238,19 @@ function parallel<
   C extends MContext,
   E extends EventBody,
   I,
+  EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends Record<string, (input: any) => unknown>,
   const PD extends {
     [K in string]:
-    | [Array<StDefCoreItem<C, E, I, G, A>>, { [L in string]: StateDefinition<C, E, I, G, A, S> }]
-    | [{ [L in string]: StateDefinition<C, E, I, G, A, S> }?]
+    | [Array<StDefCoreItem<C, E, I, EM, G, A>>, { [L in string]: StateDefinition<C, E, I, EM, G, A, S> }]
+    | [{ [L in string]: StateDefinition<C, E, I, EM, G, A, S> }?]
   },
 >(parallelDefinition: PD) {
   return [
-    (() => ParallelSymbol) as X_DefTypeRefluxer<C, E, I, G, A, S, typeof ParallelSymbol>,
-    transformParallelNormalizedDefinition<C, E, I, G, A, S>()<typeof parallelDefinition>(
+    (() => ParallelSymbol) as X_DefTypeRefluxer<C, E, I, EM, G, A, S, typeof ParallelSymbol>,
+    transformParallelNormalizedDefinition<C, E, I, EM, G, A, S>()<typeof parallelDefinition>(
       parallelDefinition,
     ) as unknown as {
       nType: 'parallel'
@@ -275,18 +281,20 @@ type O_IntoServiceFn<Src, S extends Record<string, (input: any) => unknown>> = S
 type CleanupEvents<
   C extends MContext,
   I,
+  EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   Data,
 > = Array<
-  | readonly ['done', NoInfer<X_DefTypeRefluxer<C, { type: 'done'; data: Data }, I, G, A>>, X_HiddenImpl] // on
-  | readonly ['error', X_DefTypeRefluxer<C, { type: 'error'; error: Error }, I, G, A>, X_HiddenImpl] // on
+  | readonly ['done', NoInfer<X_DefTypeRefluxer<C, { type: 'done'; data: Data }, I, EM, G, A>>, X_HiddenImpl] // on
+  | readonly ['error', X_DefTypeRefluxer<C, { type: 'error'; error: Error }, I, EM, G, A>, X_HiddenImpl] // on
 >
 
 function invoke<
   C extends MContext,
   E extends EventBody,
   I,
+  EM extends EmittedEvent,
   const G extends Record<string, Placeholder>,
   const A extends Record<string, Placeholder>,
   S extends Record<string, (input: any) => unknown>,
@@ -298,11 +306,11 @@ function invoke<
     input?: (arg: FnBaseParams<C, E, I>[0]) => Src extends keyof S ? Parameters<S[Src]>[0] : Si
   },
   src: Src,
-  ...cleanupEvents: CleanupEvents<C, I, G, A, Awaited<ReturnType<O_IntoServiceFn<Src, S>>>>
+  ...cleanupEvents: CleanupEvents<C, I, EM, G, A, Awaited<ReturnType<O_IntoServiceFn<Src, S>>>>
 ) {
   return [
     InvokeSymbol,
-    (() => null) as X_DefTypeRefluxer<C, E, I, G, A, S>,
+    (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A, S>,
     null,
     preparation as X_HiddenImpl,
     src as X_HiddenImpl,
@@ -347,7 +355,7 @@ function _normalizeOneAction(
         nTransition.to = transition
         break
       case 'function':
-        nTransition.actions.push({ type: 'enqueue', body: transition })
+        nTransition.actions.push({ isEnqueue: true, body: transition })
         break
     }
   }
@@ -407,7 +415,7 @@ function _parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateNa
         // on(...)
         const eType = item[0]
         const transitionArgs = item[2]!
-        if (eType in def.events || eType in def.builtinEvents) {
+        if (hasOwnProperty(def.events, eType) || hasOwnProperty(def.builtinEvents, eType)) {
           throw new Error(`Duplicate event definition for event "${eType}", at "${stateName}"[${i}]`)
         }
         if (!transitionArgs.length) {
@@ -433,7 +441,7 @@ function _parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateNa
                 `invocation event must be 'done' or 'error': ${iEType}, at state:"${stateName}"[${i}] > invoke events[${j}]`,
               )
             }
-            if (iEType in nInvocation) {
+            if (hasOwnProperty(nInvocation, iEType)) {
               throw new Error(
                 `duplicate invocation event: ${iEType}, at state:"${stateName}"[${i}] > invoke events[${j}]`,
               )
@@ -469,7 +477,7 @@ function _parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateNa
   return { def, sub }
 }
 
-function o_normalizeStates<const D extends Record<string, StateDefinition<any, any, any, any, any, any>>>(
+function o_normalizeStates<const D extends Record<string, StateDefinition<any, any, any, any, any, any, any>>>(
   stateDefOf: D,
 ) {
   return Object.entries(stateDefOf).reduce(
@@ -497,14 +505,15 @@ function o_normalizeStates<const D extends Record<string, StateDefinition<any, a
 }
 
 function transformNormalizedDefinition<
-  const D extends Record<string, StateDefinition<any, any, any, any, any, any>>,
+  const D extends Record<string, StateDefinition<any, any, any, any, any, any, any>>,
   const Initial extends string | undefined,
 >(stateDefOf: D, initialState: Initial) {
   const firstState = Object.keys(stateDefOf)?.[0]
   const initial = (
     !firstState
       ? undefined
-      : initialState && assertOrThrow(initialState in stateDefOf, `invalid initialState: "${initialState}"`)
+      : initialState &&
+        assertOrThrow(hasOwnProperty(stateDefOf, initialState), `invalid initialState: "${initialState}"`)
         ? initialState
         : firstState
   ) as Initial extends string ? Initial : string
@@ -518,6 +527,7 @@ function transformParallelNormalizedDefinition<
   C extends MContext,
   E extends EventBody,
   I,
+  EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends Record<string, (input: any) => unknown>,
@@ -525,8 +535,8 @@ function transformParallelNormalizedDefinition<
   return <
     const PD extends {
       [K in string]:
-      | [Array<StDefCoreItem<C, E, I, G, A>>, Record<string, StateDefinition<C, E, I, G, A, S>>]
-      | [Record<string, StateDefinition<C, E, I, G, A, S>>?]
+      | [Array<StDefCoreItem<C, E, I, EM, G, A>>, Record<string, StateDefinition<C, E, I, EM, G, A, S>>]
+      | [Record<string, StateDefinition<C, E, I, EM, G, A, S>>?]
     },
   >(
     parallelDefinition: PD,
@@ -537,8 +547,8 @@ function transformParallelNormalizedDefinition<
           throw new Error(`Parallel region state names cannot contain the character "/": "${regionName}"`)
         }
         const len = rawDefinition.length
-        const leafDefOf = (rawDefinition[len - 1] || {}) as Record<string, StateDefinition<C, E, I, G, A, S>>
-        const regionStDefCoreItems = (rawDefinition[len - 2] || []) as Array<StDefCoreItem<C, E, I, G, A>>
+        const leafDefOf = (rawDefinition[len - 1] || {}) as Record<string, StateDefinition<C, E, I, EM, G, A, S>>
+        const regionStDefCoreItems = (rawDefinition[len - 2] || []) as Array<StDefCoreItem<C, E, I, EM, G, A>>
 
         const { def } = _parseStDefItems(regionStDefCoreItems, regionName)
         return [
@@ -560,18 +570,24 @@ function transformParallelNormalizedDefinition<
 
 // ===
 
-function o_setPPath(
+function o_setPPathAndAddCatalog(
   nStItemRecord: NormalizedDefinition['states'] | ParallelNormalizedDefinition['regions'],
   parent: string,
-  addToCatalog: (stPath: string, state: NormalizedStateItem) => unknown,
+  addToCatalog: (stPath: string, state: NormalizedStateItemBoth) => unknown,
+  isRegion: boolean,
+  addRegionPath: (regionPath: string) => unknown,
 ) {
   for (const [key, nState] of Object.entries(nStItemRecord)) {
     nState.def.pPath = parent
     const stPath = `${parent}${ST_DELIM}${key}`
     addToCatalog(stPath, nState)
+    if (isRegion) {
+      addRegionPath(stPath)
+    }
     const { sub } = nState
     if (sub) {
-      o_setPPath('regions' in sub ? sub.regions : sub.states, stPath, addToCatalog)
+      const isParallel = 'regions' in sub
+      o_setPPathAndAddCatalog(isParallel ? sub.regions : sub.states, stPath, addToCatalog, isParallel, addRegionPath)
     }
   }
 }
@@ -580,7 +596,7 @@ function ooo_getTransitionFullPath(
   to: string,
   crrPath: string,
   pPath: string,
-  stateCatalog: Map<string, NormalizedStateItem>,
+  stateCatalog: Map<string, NormalizedStateItemBoth>,
 ) {
   const pth =
     to[0] === ST_DELIM
@@ -602,12 +618,14 @@ function ooo_getTransitionFullPath(
   }
   return ''
 }
-function oo_readyToValidateTransition(
-  stateCatalog: Map<string, NormalizedStateItem>,
+function oo_readyToValidateTransitionAndSetFullTo(
+  stateCatalog: Map<string, NormalizedStateItemBoth>,
   statePath: string,
-  nState: NormalizedStateItem,
+  pPath: string,
+  regionPaths: string[],
 ) {
-  const { pPath } = nState.def
+  const regionUnder = regionPaths.find((regionPath) => pPath.startsWith(regionPath))
+  const parallelRoot = !regionUnder ? null : parentPathOf(regionUnder)
 
   return (transitions: NormalizedTransition[], eType: string) => {
     for (const transition of transitions) {
@@ -619,55 +637,66 @@ function oo_readyToValidateTransition(
       if (!tFullPath) {
         throw new Error(`Invalid transition "${to}" in state "${statePath.slice(1)}" (on:"${eType}").`)
       }
+      if (regionUnder && !tFullPath.startsWith(regionUnder) && tFullPath.startsWith(parallelRoot!)) {
+        throw new Error(
+          `Transitions in a parallel state cannot target a different region: on('${eType}', ['${to}', ...]) in state "${statePath.slice(1)}".`,
+        )
+      }
       transition.fullTo = tFullPath
     }
   }
 }
-function o_validateTransitionAndSetFullTo(stateCatalog: Map<string, NormalizedStateItem>) {
+function o_validateTransitionAndSetFullTo(stateCatalog: Map<string, NormalizedStateItemBoth>, regionPaths: string[]) {
   stateCatalog.forEach((nState, statePath) => {
     const {
       def: { builtinEvents, events, invocations },
     } = nState
-    const validateTransition = oo_readyToValidateTransition(stateCatalog, statePath, nState)
+    const validateTransitionAndSetFullTo = oo_readyToValidateTransitionAndSetFullTo(
+      stateCatalog,
+      statePath,
+      nState.def.pPath,
+      regionPaths,
+    )
     Object.entries(builtinEvents).forEach(([eType, transitions]) => {
-      validateTransition(transitions, eType)
+      validateTransitionAndSetFullTo(transitions, eType)
     })
     Object.entries(events).forEach(([eType, transitions]) => {
       if (!transitions) return
-      validateTransition(transitions, eType)
+      validateTransitionAndSetFullTo(transitions, eType)
     })
     for (const { done, error } of invocations) {
       if (done) {
-        validateTransition(done, 'done')
+        validateTransitionAndSetFullTo(done, 'done')
       }
       if (error) {
-        validateTransition(error, 'error')
+        validateTransitionAndSetFullTo(error, 'error')
       }
     }
   })
 }
 
-type O_GlobalEvents<
+type X_GlobalEvents<
   C extends MContext,
   E extends EventBody,
   I,
+  EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
-> = Array<readonly [E['type'] | BuiltinEType, X_DefTypeRefluxer<C, E, I, G, A>, X_HiddenImpl]>
+> = Array<readonly [E['type'] | BuiltinEType, X_DefTypeRefluxer<C, E, I, EM, G, A>, X_HiddenImpl]>
 
 function getDefinitionAndCatalog<
   C extends MContext,
   const E extends EventBody,
-  const EM extends EmittedEvent,
   const I,
+  const EM extends EmittedEvent,
   const O,
   const S extends Record<string, (input: any) => unknown>,
-  const D extends { [K in string]: StateDefinition<C, E, I, G, A, S> },
+  const D extends { [K in string]: StateDefinition<C, E, I, EM, G, A, S> },
   const G extends Record<string, Placeholder> = Record<string, Placeholder>,
   const A extends Record<string, Placeholder> = Record<string, Placeholder>,
 >(
-  config: MachineConfig<C, E, EM, I, O, G, A, S>,
-  defineStates: (define: Expand<X_DefineStatesParam>) => readonly [O_GlobalEvents<C, E, I, G, A>, D] | readonly [D] | D,
+  config: MachineConfig<C, E, I, EM, O, G, A, S>,
+  defineStates: (define: Expand<X_DefineStatesParam>) => readonly [X_GlobalEvents<C, E, I, EM, G, A>, D] | readonly [D] | D,
 ) {
   {
     const configOut = ark_m_config.MachineConfig(config)
@@ -684,7 +713,7 @@ function getDefinitionAndCatalog<
     invoke,
   })
 
-  const [stateDefDict, globalEvents]: [D, O_GlobalEvents<C, E, I, G, A> | undefined] = Array.isArray(rawDefinition)
+  const [stateDefDict, globalEvents]: [D, X_GlobalEvents<C, E, I, EM, G, A> | undefined] = Array.isArray(rawDefinition)
     ? ([rawDefinition[rawDefinition.length - 1], rawDefinition[rawDefinition.length - 2]] as const)
     : ([rawDefinition, []] as const)
   {
@@ -699,47 +728,59 @@ function getDefinitionAndCatalog<
 
   const { initial, states } = transformNormalizedDefinition(stateDefDict, config.initialState)
 
-  const stateCatalog = new Map<string, NormalizedStateItem>()
-  o_setPPath(states, '', (stPath: string, state: NormalizedStateItem) => {
-    stateCatalog.set(stPath, state)
-  })
-  o_validateTransitionAndSetFullTo(stateCatalog)
+  const stateCatalog = new Map<string, NormalizedStateItemBoth>()
+  const regionPaths: string[] = []
+  o_setPPathAndAddCatalog(
+    states,
+    '',
+    (stPath: string, state: NormalizedStateItemBoth) => stateCatalog.set(stPath, state),
+    false,
+    (regionPath: string) => regionPaths.push(regionPath),
+  )
+  regionPaths.sort((a, b) => b.length - a.length)
+
+  o_validateTransitionAndSetFullTo(stateCatalog, regionPaths)
 
   const {
     def: { events, builtinEvents },
   } = _parseStDefItems(globalEvents || [], '(root)')
-  return { definition: { initial, events, builtinEvents, states }, stateCatalog }
+  return {
+    definition: { initial, events, builtinEvents, states },
+    stateCatalog, regionPaths
+  }
 }
 
 export function createMachine<
   C extends MContext,
   const E extends EventBody,
-  const EM extends EmittedEvent,
   const I,
+  const EM extends EmittedEvent,
   const O,
   const S extends Record<string, (input: any) => unknown>,
-  const D extends { [K in string]: StateDefinition<C, E, I, G, A, S> },
+  const D extends { [K in string]: StateDefinition<C, E, I, EM, G, A, S> },
   const G extends Record<string, Placeholder> = Record<string, Placeholder>,
   const A extends Record<string, Placeholder> = Record<string, Placeholder>,
 >(
-  config: Expand<MachineConfig<C, E, EM, I, O, G, A, S>>,
-  defineStates: (define: Expand<X_DefineStatesParam>) => readonly [O_GlobalEvents<C, E, I, G, A>, D] | readonly [D] | D,
+  config: Expand<MachineConfig<C, E, I, EM, O, G, A, S>>,
+  defineStates: (define: Expand<X_DefineStatesParam>) => readonly [X_GlobalEvents<C, E, I, EM, G, A>, D] | readonly [D] | D,
   //defineStates: ( define: Expand<T_DefineStatesParam>) => D,
 ) {
-  const { definition, stateCatalog } = getDefinitionAndCatalog<C, E, EM, I, O, S, D, G, A>(config, defineStates)
+  const { definition, stateCatalog, regionPaths } =
+    getDefinitionAndCatalog<C, E, I, EM, O, S, D, G, A>(config, defineStates)
 
   const { name, initContext, output, guards, actions, services } = config
 
-  const m: Machine<C, E, EM, I, O, G, A, S, typeof definition> = {
+  const m: Machine<C, E, I, EM, O, G, A, S, typeof definition> = {
     [MachineSymbol]: true,
     name: name || '(machine)',
     initContext,
     output,
-    guards,
-    actions,
-    services,
+    guards: guards || ({} as any),
+    actions: actions || ({} as any),
+    services: services || ({} as any),
     definition,
     stateCatalog,
+    regionPaths,
   }
   return deepFreeze(m)
 

@@ -4,11 +4,6 @@ export function ensureArray<T>(v: T | T[] | undefined): T[] {
   return Array.isArray(v) ? v : !v ? [] : [v]
 }
 
-type Entries<T> = (keyof T extends infer U ? (U extends keyof T ? [U, T[U]] : never) : never)[]
-export function getObjEntries<T extends Record<string, unknown>>(obj: T): Entries<T> {
-  return Object.entries(obj) as Entries<T>
-}
-
 export function randomString(length = 16) {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
   const chLen = chars.length
@@ -26,12 +21,6 @@ export function assertOrThrow<T>(validCondition: T, msg: string): validCondition
   return true
 }
 
-export function joinStateToPath(pPath: string, stateName: string) {
-  return `${pPath}${ST_DELIM}${stateName}`
-}
-export function getTransitionFullPath(transitionTarget: string, crrStatePath: string, pPath: string) {
-  return transitionTarget[0] === ST_DELIM ? transitionTarget : transitionTarget.startsWith('./') ? joinStateToPath(crrStatePath, transitionTarget.slice(2)) : joinStateToPath(pPath, transitionTarget)
-}
 
 function getCircularReplacer() {
   const seen = new WeakSet()
@@ -55,6 +44,8 @@ export function stringifyCircular(target: any) {
   })
 }
 
+// == object 関係 ==
+
 export function deepFreeze<T>(obj: T): Readonly<T> {
   if (obj === null || (typeof obj !== "object" && typeof obj !== "function")) {
     return obj
@@ -75,4 +66,64 @@ export function deepFreeze<T>(obj: T): Readonly<T> {
     console.error("Error occurred in deepFreeze:", error)
     return obj;
   }
+}
+
+type O_Entries<T> = (keyof T extends infer U ? (U extends keyof T ? [U, T[U]] : never) : never)[]
+export function getObjEntries<T extends Record<string, unknown>>(obj: T): O_Entries<T> {
+  return Object.entries(obj) as O_Entries<T>
+}
+
+// Object.defineProperty に typescript の型チェック(value の型)を追加: 主に writable 用途
+export function defineFixedProperty<T extends object, K extends keyof T>(
+  obj: T,
+  key: K,
+  value: T[K],
+  option?: Parameters<typeof Object.defineProperty>[2]
+) {
+  Object.defineProperty(obj, key, {
+    value,
+    ...option
+  });
+}
+
+// NOTE: ES2022 なら Object.hasOwn を使う方がいい
+// biome-ignore lint: x
+export function hasOwnProperty(obj: object, key: string) {
+  // biome-ignore lint: x
+  return Object.prototype.hasOwnProperty.call(obj, key)
+}
+
+
+// == state path 関係 ==
+
+export function joinStNameToPath(pPath: string, stateName: string) {
+  return `${pPath}${ST_DELIM}${stateName}`
+}
+export function getTransitionFullPath(transitionTarget: string, crrStatePath: string, pPath: string) {
+  return transitionTarget[0] === ST_DELIM ? transitionTarget : transitionTarget.startsWith(`.${ST_DELIM}`) ? joinStNameToPath(crrStatePath, transitionTarget.slice(2)) : joinStNameToPath(pPath, transitionTarget)
+}
+export function parentPathOf(statePath: string) {
+  return statePath.slice(0, statePath.lastIndexOf(ST_DELIM))
+}
+export function splitStPath(statePath: string) {
+  return statePath.slice(1).split(ST_DELIM)
+}
+// paths は '/' から始まる文字列
+export function calcCommonPathPrefix(paths: string[]) {
+  if (paths.length < 2) return paths?.[0] || ''
+  const model = paths[0]!
+  const rest = paths.slice(1)
+  let bgn = 1
+  let end = model.indexOf(ST_DELIM, bgn) + 1
+  loop: while (end) {
+    const needle = model.slice(bgn, end)
+    for (const pth of rest) {
+      if (!pth.startsWith(needle, bgn)) {
+        break loop
+      }
+    }
+    bgn = end
+    end = model.indexOf(ST_DELIM, bgn) + 1
+  }
+  return model.slice(0, bgn - 1)
 }

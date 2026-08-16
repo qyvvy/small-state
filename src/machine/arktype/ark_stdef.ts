@@ -3,7 +3,7 @@ import { InvokeSymbol, TransitionSymbol } from '../m.types'
 import { SubStNormalizedDefinition } from './ark_normalized'
 import { AnyFn } from './arktype.internal'
 
-const o_ActionBody = type({ type: '"function"|"string"', body: type.or(AnyFn, 'string'), 'params?': 'unknown' })
+const o_ActionBody = type({ body: type.or(AnyFn, 'string'), 'params?': 'unknown' })
 const GuardReturn = type([type.unit(TransitionSymbol), '"guards"', o_ActionBody, AnyFn]).readonly()
 const ActionReturn = type([type.unit(TransitionSymbol), '"actions"', o_ActionBody, AnyFn, 'null']).readonly()
 export const Transition = type.or('string', GuardReturn, ActionReturn, AnyFn).array()

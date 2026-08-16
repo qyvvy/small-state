@@ -2,7 +2,7 @@ import { type } from 'arktype'
 import { BUILTIN_ETYPES } from '../m.types'
 import { AnyFn } from "./arktype.internal";
 
-const NormalizedActionBody = type({ type: '"function"|"string"|"enqueue"', body: type.or(AnyFn, 'string'), 'params?': 'unknown' })
+const NormalizedActionBody = type({ body: type.or(AnyFn, 'string'), 'params?': 'unknown', 'isEnqueue?': 'boolean' })
 
 const o_NormalizedTransitions = type({
   'to?': 'string',

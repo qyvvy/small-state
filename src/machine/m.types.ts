@@ -23,20 +23,25 @@ export type EventBody = { type: string;[key: string]: any }
 export type EmittedEvent = { type: string;[key: string]: any }
 export type StateName = string
 
+// type 以外のプロパティを持たない EventBody の型を抽出する
+export type PureEventType<E extends EventBody> =
+  E extends unknown ? Exclude<keyof E, "type"> extends never ? E['type'] : never : any
+
 export type FnBaseParams<C extends MContext, Ex extends EventBody, I, Additional = unknown, P = any> = [
   arg: Expand<{ c: C; context: C; e: Ex; event: Ex; input: I } & Additional>,
   params: P
 ]
-export type ActionFnParams<C extends MContext, Ex extends EventBody, I, P = any> =
-  FnBaseParams<C, Ex, I, { update: UpdateFn<C> }, P>
+export type ActionFnParams<C extends MContext, Ex extends EventBody, I, EM extends EmittedEvent, P = any> =
+  FnBaseParams<C, Ex, I, { update: UpdateFn<C>, emit: EmitFn<EM> }, P>
 
 
-type O_NormalizedActionBody = { type: 'function' | 'string' | 'enqueue', body: AnyFn | string, params?: unknown }
+type X_NormalizedGuardBody = { body: AnyFn<boolean> | string, params?: unknown | AnyFn }
+type X_NormalizedActionBody = { body: AnyFn | string, params?: unknown | AnyFn, isEnqueue?: true }
 export type NormalizedTransition = {
   to?: StateName
   fullTo?: StateName
-  actions: O_NormalizedActionBody[]
-  guards: O_NormalizedActionBody[]
+  guards: X_NormalizedGuardBody[]
+  actions: X_NormalizedActionBody[]
 }
 
 export type NormalizedInvocation = {
@@ -48,8 +53,8 @@ export type NormalizedInvocation = {
 }
 
 type O_NormalizedOneAction = {
-  actions: O_NormalizedActionBody[]
-  guards: O_NormalizedActionBody[]
+  guards: X_NormalizedGuardBody[]
+  actions: X_NormalizedActionBody[]
 }
 export type NStateItemDef<Et extends string> = {
   pPath: string
@@ -64,10 +69,15 @@ export type NStateItemDef<Et extends string> = {
   events: { [K in Et]?: NormalizedTransition[] }
 }
 
-export type NormalizedStateItem<P extends boolean = false> = {
+export type NormalizedStateItem = {
   def: NStateItemDef<string>
-  sub: NormalizedDefinition | (P extends false ? null | ParallelNormalizedDefinition : never)
+  sub: null | NormalizedDefinition | ParallelNormalizedDefinition
 }
+export type ParallelNormalizedStateItem = {
+  def: NStateItemDef<string>
+  sub: NormalizedDefinition
+}
+export type NormalizedStateItemBoth = NormalizedStateItem | ParallelNormalizedStateItem
 
 export type NormalizedDefinition = {
   initial: string | undefined,
@@ -75,7 +85,7 @@ export type NormalizedDefinition = {
 }
 export type ParallelNormalizedDefinition = {
   nType: 'parallel'
-  regions: Record<string, NormalizedStateItem<true>>
+  regions: Record<string, ParallelNormalizedStateItem>
 }
 
 export type ParamsArgOf<
@@ -89,16 +99,19 @@ export type ParamsArgOf<
   : [params: R[Rk] | ((arg: FnBaseParams<C, Ex, I>[0]) => R[Rk])]
 
 // TODO: もし Cが narrow されるのなら Duplicate する
-export type UpdateFn<C extends MContext> = (updates: {
-  [K in keyof C]?: C[K] | Promise<C[K]> | (() => C[K] | Promise<C[K]>)
-}) => unknown
+export type UpdateFnParam<C extends MContext> = {
+  [K in keyof C]?: C[K] | Promise<C[K]> | (() => (C[K] | Promise<C[K]>))
+}
+export type UpdateFn<C extends MContext> = (updates: UpdateFnParam<C>) => unknown
+
+export type EmitFn<EM extends EmittedEvent> = (emittedEvent: EM) => unknown
 
 
 export type MachineConfig<
   C extends MContext,
   E extends EventBody,
-  EM extends EmittedEvent,
   I,
+  EM extends EmittedEvent,
   O,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
@@ -118,8 +131,8 @@ export const MachineSymbol: unique symbol = Symbol('Machine')
 export type Machine<
   C extends MContext,
   E extends EventBody,
-  EM extends EmittedEvent,
   I,
+  EM extends EmittedEvent,
   O,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
@@ -130,11 +143,12 @@ export type Machine<
   name: string,
   initContext?: (input: I) => C
   output?: (arg: Omit<FnBaseParams<C, E, I, unknown>[0], 'jot'>) => O // マシンが最終状態になったときに実行される
-  guards?: { [K in keyof G]: (arg: FnBaseParams<C, E, I>[0], params: G[K]) => boolean }
-  actions?: {
+  guards: { [K in keyof G]: (arg: FnBaseParams<C, E, I>[0], params: G[K]) => boolean }
+  actions: {
     [K in keyof A]: (arg: FnBaseParams<C, E, I, { update: UpdateFn<C> }>[0], params: A[K]) => unknown
   }
-  services?: S
+  services: S
   definition: ND
-  stateCatalog: Map<string, NormalizedStateItem>
+  stateCatalog: Map<string, NormalizedStateItemBoth>
+  regionPaths: string[]
 }
