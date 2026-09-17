@@ -6,7 +6,7 @@ import type {
   EventBody,
   FnBaseParams,
   MContext,
-  ParamsArgOf,
+  ParamsInputArgsOf,
 } from './m.types'
 
 
@@ -33,7 +33,7 @@ export type EnqueueActions<
 
 export type CheckFn<
   C extends MContext, Ex extends EventBody, I, G extends Record<string, Placeholder>
-> = < Gk extends keyof G & string | never >(type: Gk, ...args: ParamsArgOf<G, Gk, C, Ex, I>) => boolean
+> = < Gk extends keyof G & string | never >(type: Gk, ...args: ParamsInputArgsOf<G, Gk, C, Ex, I>) => boolean
 //export type check<Gk extends (keyof G & string) | never>(type: Gk, ...args: ParamsArgOf<G, Gk, C, Ex, I>): boolean
 
 export type EnqueueFn<
@@ -43,7 +43,7 @@ export type EnqueueFn<
   //update: UpdateFn<C>
   <Ak extends keyof A | never>(
     type: Ak,
-    ...args: ParamsArgOf<A, Ak, C, Ex, I>
+    ...args: ParamsInputArgsOf<A, Ak, C, Ex, I>
   ): void
   (
     fn: (...args: FnBaseParams<C, Ex, I, {

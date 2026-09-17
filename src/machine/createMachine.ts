@@ -1,11 +1,10 @@
 import { type as arkType } from 'arktype'
 import { ST_DELIM } from '../shared/constants'
-import type { AnyFn, Expand, IsAny, One, OneOrMany, Placeholder, Values } from '../shared/general.types'
-import { assertOrThrow, deepFreeze, ensureArray, hasOwnProperty, parentPathOf, randomString } from '../shared/utils'
+import type { AnyFn, Expand, OneOrMany, Placeholder, Values } from '../shared/general.types'
+import { assertOrThrow, deepFreeze, ensureArray, parentPathOf, randomString } from '../shared/utils'
 import * as ark_m_config from './arktype/ark_m_config'
 import type * as ark_normalized from './arktype/ark_normalized'
 import * as ark_stdef from './arktype/ark_stdef'
-import type { EnqueueActions } from './createMachine-enqueue'
 import type {
   ActionFnParams,
   BuiltinEType,
@@ -13,27 +12,25 @@ import type {
   EventBody,
   ExtractEvent,
   FnBaseParams,
+  GlobalStDefItem,
   Machine,
   MachineConfig,
   MContext,
   NormalizedDefinition,
-  NormalizedInvocation,
-  NormalizedStateItem,
   NormalizedStateItemBoth,
   NormalizedTransition,
   NStateItemDef,
   ParallelNormalizedDefinition,
-  ParallelNormalizedStateItem,
-  ParamsArgOf,
+  ParamsInput,
   StateName,
 } from './m.types'
 import {
+  EntrySymbol,
+  ExitSymbol,
   InvokeSymbol,
-  isBuiltinEType,
   MachineSymbol,
   ParallelSymbol,
   SubStatesSymbol,
-  TransitionSymbol,
 } from './m.types'
 
 type X_HiddenImpl = any & { __brand: 'HiddenImpl' }
@@ -44,14 +41,15 @@ type X_DefTypeRefluxer<
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
+  Eb extends BuiltinEType = BuiltinEType,
   S extends Record<string, (input: any) => unknown> = Record<string, (input: any) => unknown>, // Services
   R = unknown,
 > = () => R
 
 type X_DefineStatesParam = {
   on: typeof on
-  Guard: typeof Guard
-  Action: typeof Action
+  entryHook: typeof entryHook
+  exitHook: typeof exitHook
   subStates: typeof subStates
   parallel: typeof parallel
   invoke: typeof invoke
@@ -77,26 +75,28 @@ type X_ExtractSubStDefinition<TStateDefinition> =
   : null
   : null
 
-type O_OneAction<
-  C extends MContext,
-  E extends EventBody,
-  I,
-  EM extends EmittedEvent,
-  G extends Record<string, Placeholder>,
-  A extends Record<string, Placeholder>,
-> = Array<GuardReturn<C, E, I, G> | ActionReturn<C, E, I, EM, A> | EnqueueActions<C, E, I, EM, G, A>>
+type X_ImplKeys<IpR extends Record<string, Placeholder>> = Values<{
+  [K in keyof IpR]: unknown extends IpR[K] ? K : never
+}>
 
-type StDefMetaInfo<
+type Guard<C extends MContext, Ex extends EventBody, I, G extends Record<string, Placeholder>> =
+  | Expand<X_ImplKeys<G>>
+  | Values<{ [K in keyof G & string as unknown extends G[K] ? never : K]: { [K2 in K]: ParamsInput<G[K], C, Ex, I> } }> // { [guardName: string]: Params }
+  | ((arg: FnBaseParams<C, Ex, I>[0]) => boolean)
+
+type Action<
   C extends MContext,
-  E extends EventBody,
+  Ex extends EventBody,
   I,
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
-> = {
-  tags?: string[]
-  entryHook?: EnqueueActions<C, E, I, EM, G, A> | O_OneAction<C, E, I, EM, G, A>
-  exitHook?: EnqueueActions<C, E, I, EM, G, A> | O_OneAction<C, E, I, EM, G, A>
+> =
+  | Expand<X_ImplKeys<A>>
+  | Values<{ [K in keyof A & string as unknown extends A[K] ? never : K]: { [K2 in K]: ParamsInput<A[K], C, Ex, I> } }> // { [actionName: string]: Params }
+  | ((arg: ActionFnParams<C, Ex, I, EM, G, A>[0]) => unknown)
+
+type StDefMetaInfo = {
   isFinal?: boolean
 }
 
@@ -107,7 +107,11 @@ type StDefCoreItem<
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
-> = StDefMetaInfo<C, E, I, EM, G, A> | readonly [E['type'] | BuiltinEType, X_DefTypeRefluxer<C, E, I, EM, G, A>, X_HiddenImpl] // on
+> =
+  | StDefMetaInfo
+  | readonly [E['type'] | BuiltinEType, X_DefTypeRefluxer<C, E, I, EM, G, A>, X_HiddenImpl] // on
+  | readonly [typeof EntrySymbol, X_DefTypeRefluxer<C, E, I, EM, G, A>, null, X_HiddenImpl] // entryHook
+  | readonly [typeof ExitSymbol, X_DefTypeRefluxer<C, E, I, EM, G, A>, null, X_HiddenImpl] // exitHook
 
 type StateDefinition<
   C extends MContext,
@@ -119,71 +123,51 @@ type StateDefinition<
   S extends Record<string, (input: any) => unknown>,
 > = null | Array<
   | StDefCoreItem<C, E, I, EM, G, A>
-  | readonly [X_DefTypeRefluxer<C, E, I, EM, G, A, S, any>, unknown] // subStates|parallel
-  | readonly [typeof InvokeSymbol, X_DefTypeRefluxer<C, E, I, EM, G, A, S>, null, unknown, any, any] // invoke
+  | readonly [X_DefTypeRefluxer<C, E, I, EM, G, A, BuiltinEType, S, any>, unknown] // subStates|parallel
+  | readonly [typeof InvokeSymbol, X_DefTypeRefluxer<C, E, I, EM, G, A, never, S>, null, unknown, any, any] // invoke
 >
 
-type GuardReturn<C extends MContext, Ex extends EventBody, I, G extends Record<string, Placeholder>> = readonly [
-  typeof TransitionSymbol,
-  'guards',
-  X_HiddenImpl,
-  X_DefTypeRefluxer<C, Ex, I, any, G, any>,
-]
-
-function Guard<
+function entryHook<
+  C extends MContext, E extends EventBody, I, EM extends EmittedEvent, const G extends Record<string, Placeholder>, const A extends Record<string, Placeholder>
+>(...actions: Array<
+  | Expand<X_ImplKeys<A>>
+  | ((arg: ActionFnParams<C, E, I, EM, G, A>[0]) => unknown)
+  | Values<{ [K in keyof A & string as unknown extends A[K] ? never : K]: { [K2 in K]: ParamsInput<A[K], C, E, I> } }>
+>): readonly [typeof EntrySymbol, X_DefTypeRefluxer<C, E, I, EM, G, A, ":always:" | ":childDone:", Record<string, (input: any) => unknown>, unknown>, null, Action<C, E, I, EM, G, A>[]]
+function entryHook<
   C extends MContext,
-  Ex extends EventBody,
-  I,
-  G extends Record<string, Placeholder>,
-  Gk extends keyof G | never,
->(body: Gk | ((arg: FnBaseParams<C, Ex, I>[0]) => boolean), ...args: ParamsArgOf<G, Gk, C, Ex, I>) {
-  return [
-    TransitionSymbol,
-    'guards',
-    { body, ...(args.length ? { params: args[0] } : {}) },
-    (() => null) as X_DefTypeRefluxer<C, Ex, I, any, G, any>,
-  ] as const // GuardReturn
-}
-
-type ActionReturn<C extends MContext, Ex extends EventBody, I, EM extends EmittedEvent, A extends Record<string, Placeholder>> = readonly [
-  typeof TransitionSymbol,
-  'actions',
-  X_HiddenImpl,
-  X_DefTypeRefluxer<C, Ex, I, EM, any, A, any>,
-  null,
-]
-
-function Action<
-  C extends MContext,
-  Ex extends EventBody,
+  E extends EventBody,
   I,
   EM extends EmittedEvent,
-  A extends Record<string, Placeholder>,
-  Ak extends keyof A | never,
->(body: Ak | ((arg: ActionFnParams<C, Ex, I, EM, unknown>[0]) => unknown), ...args: ParamsArgOf<A, Ak, C, Ex, I>) {
-  return [
-    TransitionSymbol,
-    'actions',
-    { body, ...(args.length ? { params: args[0] } : {}) },
-    (() => null) as X_DefTypeRefluxer<C, Ex, I, EM, any, A>,
-    null,
-  ] as const // ActionReturn
+  const G extends Record<string, Placeholder>,
+  const A extends Record<string, Placeholder>,
+>(...actions: Array<Action<C, E, I, EM, G, A>>) {
+  return [EntrySymbol, (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A>, null, actions] as const // StDefItems
 }
 
-type Transition<
+function exitHook<
+  C extends MContext,
+  E extends EventBody,
+  I,
+  EM extends EmittedEvent,
+  const G extends Record<string, Placeholder>,
+  const A extends Record<string, Placeholder>,
+>(...actions: Array<Action<C, E, I, EM, G, A>>) {
+  return [ExitSymbol, (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A>, null, actions] as const // StDefItems
+}
+
+type O_Transition<
   C extends MContext,
   Ex extends EventBody,
   I,
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
-> = Array<
-  | StateName
-  //| readonly [T_DefTypeRefluxer<C, Ex, I, G, any>, typeof GuardSymbol, T_HiddenImpl]
-  | GuardReturn<C, Ex, I, G>
-  | ActionReturn<C, Ex, I, EM, A>
-  | EnqueueActions<C, Ex, I, EM, G, A>
->
+> = {
+  to?: StateName
+  guard?: OneOrMany<Guard<C, Ex, I, G>>
+  actions?: OneOrMany<Action<C, Ex, I, EM, G, A>>
+}
 
 function on<
   C extends MContext,
@@ -192,12 +176,10 @@ function on<
   EM extends EmittedEvent,
   const G extends Record<string, Placeholder>,
   const A extends Record<string, Placeholder>,
-  Et extends [E] extends [never] ? string : E['type'] | BuiltinEType | never,
->(
-  eventType: Et,
-  ...transitions: [Transition<C, ExtractEvent<E, Et>, I, EM, G, A>, ...Array<Transition<C, ExtractEvent<E, Et>, I, EM, G, A>>]
-) {
-  return [eventType, (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A>, transitions as X_HiddenImpl] as const // StDefCoreItem
+  Et extends [E] extends [never] ? string : E['type'] | Eb | never,
+  Eb extends BuiltinEType = BuiltinEType,
+>(eventType: Et, config: OneOrMany<Expand<O_Transition<C, ExtractEvent<E, Et>, I, EM, G, A>>>) {
+  return [eventType, (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A, Eb>, config as X_HiddenImpl] as const // StDefCoreItem, InvocationCleanupEvents
 }
 
 function subStates<
@@ -212,7 +194,7 @@ function subStates<
   const Initial extends keyof D & string,
 >(stateDefinition: D, initialState?: Initial) {
   return [
-    (() => SubStatesSymbol) as X_DefTypeRefluxer<C, E, I, EM, G, A, S, typeof SubStatesSymbol>,
+    (() => SubStatesSymbol) as X_DefTypeRefluxer<C, E, I, EM, G, A, BuiltinEType, S, typeof SubStatesSymbol>,
     transformNormalizedDefinition(stateDefinition, initialState) as {
       initial: [Initial] extends [never] ? undefined : Initial
       states: {
@@ -249,12 +231,12 @@ function parallel<
   },
 >(parallelDefinition: PD) {
   return [
-    (() => ParallelSymbol) as X_DefTypeRefluxer<C, E, I, EM, G, A, S, typeof ParallelSymbol>,
+    (() => ParallelSymbol) as X_DefTypeRefluxer<C, E, I, EM, G, A, BuiltinEType, S, typeof ParallelSymbol>,
     transformParallelNormalizedDefinition<C, E, I, EM, G, A, S>()<typeof parallelDefinition>(
       parallelDefinition,
     ) as unknown as {
-      nType: 'parallel'
-      regions: {
+      dType: 'parallel'
+      states: {
         [K in keyof PD]: {
           def: NStateItemDef<O_ExtractRegionEType<PD[K]>>
           sub: {
@@ -278,7 +260,7 @@ type O_IntoServiceFn<Src, S extends Record<string, (input: any) => unknown>> = S
   ? S[Src]
   : never
 
-type CleanupEvents<
+type InvocationCleanupEvents<
   C extends MContext,
   I,
   EM extends EmittedEvent,
@@ -286,8 +268,8 @@ type CleanupEvents<
   A extends Record<string, Placeholder>,
   Data,
 > = Array<
-  | readonly ['done', NoInfer<X_DefTypeRefluxer<C, { type: 'done'; data: Data }, I, EM, G, A>>, X_HiddenImpl] // on
-  | readonly ['error', X_DefTypeRefluxer<C, { type: 'error'; error: Error }, I, EM, G, A>, X_HiddenImpl] // on
+  | readonly ['done', NoInfer<X_DefTypeRefluxer<C, { type: 'done'; data: Data }, I, EM, G, A, never>>, X_HiddenImpl] // on
+  | readonly ['error', X_DefTypeRefluxer<C, { type: 'error'; error: Error }, I, EM, G, A, never>, X_HiddenImpl] // on
 >
 
 function invoke<
@@ -306,11 +288,11 @@ function invoke<
     input?: (arg: FnBaseParams<C, E, I>[0]) => Src extends keyof S ? Parameters<S[Src]>[0] : Si
   },
   src: Src,
-  ...cleanupEvents: CleanupEvents<C, I, EM, G, A, Awaited<ReturnType<O_IntoServiceFn<Src, S>>>>
+  ...cleanupEvents: InvocationCleanupEvents<C, I, EM, G, A, Awaited<ReturnType<O_IntoServiceFn<Src, S>>>>
 ) {
   return [
     InvokeSymbol,
-    (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A, S>,
+    (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A, BuiltinEType, S>,
     null,
     preparation as X_HiddenImpl,
     src as X_HiddenImpl,
@@ -327,83 +309,44 @@ const o_getNormalizedStDefTemplate = (): {
   def: {
     pPath: '',
     final: false,
-    tags: new Set(),
-    entryHook: null,
-    exitHook: null,
+    //tags: new Set(),
+    entryHooks: null,
+    exitHooks: null,
     invocations: [],
-    builtinEvents: {},
+    internalEvents: {},
     events: {},
   },
   sub: null,
 })
 
-function _normalizeOneAction(
-  transitions: typeof ark_stdef.Transition.infer,
-  makeDuplicateTargetErrMsg: (transition: (typeof ark_stdef.Transition.infer)[number], k: number) => string = () => '',
-) {
-  const nTransition: NormalizedTransition = { actions: [], guards: [] }
-  for (const [k, transition] of transitions.entries()) {
-    if (Array.isArray(transition)) {
-      nTransition[transition[1]].push(transition[2]) // guard or action
-      continue
-    }
-    switch (typeof transition) {
-      case 'string':
-        if (nTransition.to) {
-          throw new Error(makeDuplicateTargetErrMsg(transition, k))
-        }
-        nTransition.to = transition
-        break
-      case 'function':
-        nTransition.actions.push({ isEnqueue: true, body: transition })
-        break
-    }
-  }
-  return nTransition
+function o_normalizeTransitions(transitions: Array<typeof ark_stdef.Transition.infer>) {
+  return transitions.map(({ actions, guard, ...rest }) => ({
+    actions: ensureArray(actions),
+    guards: ensureArray(guard),
+    ...rest,
+  }))
 }
 
-function _normalizeTransition(
-  transitionArgs: Array<typeof ark_stdef.Transition.infer>,
-  eType: string,
-  stateName: string,
-  i: number,
-) {
-  const nTransitions: NormalizedTransition[] = []
-
-  for (const [j, transitions] of transitionArgs.entries()) {
-    if (!transitions.length) {
-      throw new Error(
-        `on(eventType, ...configs): configs must not be empty, at { ${stateName}: [on('${eType}', configs[${j}])] }`,
-      )
-    }
-    const nTransition = _normalizeOneAction(
-      transitions,
-      (transition: (typeof ark_stdef.Transition.infer)[number], k: number) =>
-        `Duplicate target "${transition}", at state:"${stateName}"[${i}] on("${eType}", configs[${j}][${k}])`,
-    )
-    nTransitions.push(nTransition)
-  }
-  return nTransitions
-}
-
-function _parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateName: string) {
+function x_parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateName: StateName) {
   let { def, sub } = o_getNormalizedStDefTemplate()
   if (!items?.length) {
     def.final = !items
     return { def, sub }
   }
 
+  const getPath = () => `${def.pPath}${ST_DELIM}${stateName}`
+  const seenInvocationId = new Set<string>()
   for (const [i, item] of items.entries()) {
     if (!Array.isArray(item)) {
-      if ('tags' in item) {
-        def.tags = new Set(item.tags)
-      }
-      if ('entryHook' in item) {
-        def.entryHook = _normalizeOneAction(ensureArray(item.entryHook!))
-      }
-      if ('exitHook' in item) {
-        def.exitHook = _normalizeOneAction(ensureArray(item.exitHook!))
-      }
+      //if ('tags' in item) {
+      //  def.tags = new Set(item.tags)
+      //}
+      //if ('entryHook' in item) {
+      //  def.entryHook = ensureArray(item.entryHook!)
+      //}
+      //if ('exitHook' in item) {
+      //  def.exitHook = ensureArray(item.exitHook!)
+      //}
       if ('isFinal' in item) {
         def.final = !!item.isFinal
       }
@@ -413,46 +356,85 @@ function _parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateNa
     switch (typeof item?.[0]) {
       case 'string': {
         // on(...)
-        const eType = item[0]
-        const transitionArgs = item[2]!
-        if (hasOwnProperty(def.events, eType) || hasOwnProperty(def.builtinEvents, eType)) {
-          throw new Error(`Duplicate event definition for event "${eType}", at "${stateName}"[${i}]`)
+        const [eType, _, transitions] = item
+        if (Object.hasOwn(def.events, eType) || Object.hasOwn(def.internalEvents, eType)) {
+          throw new Error(`createMachine: Duplicate event definition for event "${eType}", at "${stateName}"[${i}]`)
         }
-        if (!transitionArgs.length) {
+        const mid = ensureArray(transitions!)
+        if (!mid.length || mid.some((t) => !Object.keys(t).length)) {
           throw new Error(
-            `on(eventType, ...configs): The 'configs' argument is required, at state:"${stateName}"[${i}] event:"${eType}"`,
+            `createMachine: on(eventType, config): Empty config is not allowed: on("${eType}", ${JSON.stringify(transitions)}), at "${stateName}"[${i}]`,
           )
         }
-        const nTransitions = _normalizeTransition(transitionArgs, eType, stateName, i)
-        if (isBuiltinEType(eType)) {
-          def.builtinEvents[eType] = nTransitions
-        } else {
-          def.events[eType] = nTransitions
+        const nTransitions = o_normalizeTransitions(mid)
+        switch (eType) {
+          case ':always:':
+            def.internalEvents[':always:'] = {
+              transitions: nTransitions,
+            }
+            break
+          case ':childDone:':
+            def.internalEvents[':childDone:'] = {
+              cond: ({ path }) => path === getPath(),
+              transitions: nTransitions,
+            }
+            break
+          default:
+            def.events[eType] = nTransitions
+            break
         }
         break
       }
       case 'symbol': {
-        if (item[0] === InvokeSymbol) {
-          const nInvocation: NormalizedInvocation = { ...item[3], src: item[4] }
-          def.invocations.push(nInvocation)
-          for (const [j, [iEType, _, cleanupArgs]] of item[5].entries()) {
-            if (!(iEType === 'done' || iEType === 'error')) {
-              throw new Error(
-                `invocation event must be 'done' or 'error': ${iEType}, at state:"${stateName}"[${i}] > invoke events[${j}]`,
-              )
+        switch (item[0]) {
+          case InvokeSymbol: {
+            const { id, ...rest } = item[3]
+            const ivkId = id || `(invocation-${i})`
+            if (seenInvocationId.has(ivkId)) {
+              throw new Error(`createMachine: Duplicate invocation id: "${ivkId}", at state:"${stateName}"[${i}]`)
             }
-            if (hasOwnProperty(nInvocation, iEType)) {
-              throw new Error(
-                `duplicate invocation event: ${iEType}, at state:"${stateName}"[${i}] > invoke events[${j}]`,
-              )
+            seenInvocationId.add(ivkId)
+            //const nInvocation: NormalizedInvocation = { ...item[3], src: item[4] }
+            def.invocations.push({ id: ivkId, ...rest, src: item[4] })
+
+            const { internalEvents } = def
+            for (const [j, [ivkEType, _, cleanupEvents]] of item[5].entries()) {
+              if (!(ivkEType === 'done' || ivkEType === 'error')) {
+                throw new Error(
+                  `createMachine: Invocation event must be 'done' or 'error': ${ivkEType}, at state:"${stateName}"[${i}] > invoke events[${j}]`,
+                )
+              }
+              const internalEType = `${ivkId}/${ivkEType}` as const
+              if (Object.hasOwn(internalEvents, internalEType)) {
+                throw new Error(
+                  `createMachine: Duplicate invocation event: ${ivkEType}, at state:"${stateName}"[${i}] > invoke events[${j}]`,
+                )
+              }
+              const mid = ensureArray(cleanupEvents!)
+              if (!mid.length || mid.some((t) => !Object.keys(t).length)) {
+                throw new Error(
+                  `createMachine: on(eventType, config): The 'config' argument is required, at state:"${stateName}"[${i}] > invoke events[${j}] event:"${ivkEType}"`,
+                )
+              }
+              //def.internalEvents[] = o_normalizeTransitions(mid)
+              //nInvocation[ivEType] = o_normalizeTransitions(mid)
+              internalEvents[internalEType] = {
+                cond: ({ path }) => path === getPath(),
+                transitions: o_normalizeTransitions(mid),
+              }
             }
-            if (!cleanupArgs.length) {
-              throw new Error(
-                `on(eventType, ...configs): The 'configs' argument is required, at state:"${stateName}"[${i}] > invoke events[${j}] event:"${iEType}"`,
-              )
-            }
-            nInvocation[iEType] = _normalizeTransition(cleanupArgs, iEType, stateName, j)
+            break
           }
+          case EntrySymbol: {
+            def.entryHooks = ensureArray(item[3]!)
+            break
+          }
+          case ExitSymbol: {
+            def.exitHooks = ensureArray(item[3]!)
+            break
+          }
+          default:
+            break
         }
         break
       }
@@ -460,8 +442,8 @@ function _parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateNa
         const subStDict = item[1] as Exclude<(typeof item)[1], (...args: any[]) => unknown>
         if (sub) {
           throw new Error(
-            `Duplicated subStates: at "${stateName}"[${i}] { ${Object.keys(
-              'states' in subStDict ? subStDict.states : 'regions' in subStDict ? subStDict.regions : [],
+            `createMachine: Duplicated subStates: at "${stateName}"[${i}] { ${Object.keys(
+              'states' in subStDict ? subStDict.states : {},
             )
               .map((el) => `${el}:...`)
               .join(', ')} }`,
@@ -471,7 +453,7 @@ function _parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateNa
         break
       }
       default:
-        throw new Error(`unexpected array[0] type: ${JSON.stringify(item?.[0])}`)
+        throw new Error(`createMachine: Unexpected array[0] type: ${JSON.stringify(item?.[0])}`)
     }
   }
   return { def, sub }
@@ -482,15 +464,15 @@ function o_normalizeStates<const D extends Record<string, StateDefinition<any, a
 ) {
   return Object.entries(stateDefOf).reduce(
     (acc, [stateName, stDefs]: [keyof D & string, unknown], i) => {
-      if (stateName.includes('/')) {
-        throw new Error(`State names cannot contain the character "/": "${stateName}"`)
+      if (stateName.includes(ST_DELIM)) {
+        throw new Error(`createMachine: State names cannot contain the character "${ST_DELIM}": "${stateName}"`)
       } else if (Array.isArray(stDefs) || stDefs == null) {
         const items = ark_stdef.StateDefinition.assert(stDefs)
-        const { def, sub } = _parseStDefItems(items, stateName)
+        const { def, sub } = x_parseStDefItems(items, stateName)
         acc[stateName] = { def, sub } as any
       } else {
         throw new Error(
-          `Invalid state definition for state "${String(stateName)}". Expected an array but got ${typeof stDefs}.`,
+          `createMachine: Invalid state definition for state "${String(stateName)}". Expected an array but got ${typeof stDefs}.`,
         )
       }
       return acc
@@ -513,7 +495,7 @@ function transformNormalizedDefinition<
     !firstState
       ? undefined
       : initialState &&
-        assertOrThrow(hasOwnProperty(stateDefOf, initialState), `invalid initialState: "${initialState}"`)
+        assertOrThrow(Object.hasOwn(stateDefOf, initialState), `createMachine: Invalid initialState: "${initialState}"`)
         ? initialState
         : firstState
   ) as Initial extends string ? Initial : string
@@ -541,16 +523,16 @@ function transformParallelNormalizedDefinition<
   >(
     parallelDefinition: PD,
   ) => {
-    const regions = Object.fromEntries(
+    const states = Object.fromEntries(
       Object.entries(parallelDefinition).map(([regionName, rawDefinition]) => {
-        if (regionName.includes('/')) {
-          throw new Error(`Parallel region state names cannot contain the character "/": "${regionName}"`)
+        if (regionName.includes(ST_DELIM)) {
+          throw new Error(`createMachine: Parallel region state names cannot contain the character "${ST_DELIM}": "${regionName}"`)
         }
         const len = rawDefinition.length
         const leafDefOf = (rawDefinition[len - 1] || {}) as Record<string, StateDefinition<C, E, I, EM, G, A, S>>
         const regionStDefCoreItems = (rawDefinition[len - 2] || []) as Array<StDefCoreItem<C, E, I, EM, G, A>>
 
-        const { def } = _parseStDefItems(regionStDefCoreItems, regionName)
+        const { def } = x_parseStDefItems(regionStDefCoreItems, regionName)
         return [
           regionName,
           {
@@ -562,8 +544,8 @@ function transformParallelNormalizedDefinition<
     )
 
     return {
-      nType: 'parallel',
-      regions,
+      dType: 'parallel',
+      states,
     }
   }
 }
@@ -571,7 +553,7 @@ function transformParallelNormalizedDefinition<
 // ===
 
 function o_setPPathAndAddCatalog(
-  nStItemRecord: NormalizedDefinition['states'] | ParallelNormalizedDefinition['regions'],
+  nStItemRecord: NormalizedDefinition['states'] | ParallelNormalizedDefinition['states'],
   parent: string,
   addToCatalog: (stPath: string, state: NormalizedStateItemBoth) => unknown,
   isRegion: boolean,
@@ -586,13 +568,13 @@ function o_setPPathAndAddCatalog(
     }
     const { sub } = nState
     if (sub) {
-      const isParallel = 'regions' in sub
-      o_setPPathAndAddCatalog(isParallel ? sub.regions : sub.states, stPath, addToCatalog, isParallel, addRegionPath)
+      const isParallel = 'dType' in sub && sub.dType === 'parallel'
+      o_setPPathAndAddCatalog(sub.states, stPath, addToCatalog, isParallel, addRegionPath)
     }
   }
 }
 
-function ooo_getTransitionFullPath(
+function o_getTransitionFullPath(
   to: string,
   crrPath: string,
   pPath: string,
@@ -618,7 +600,7 @@ function ooo_getTransitionFullPath(
   }
   return ''
 }
-function oo_readyToValidateTransitionAndSetFullTo(
+function x_readyToValidateTransitionAndSetFullTo(
   stateCatalog: Map<string, NormalizedStateItemBoth>,
   statePath: string,
   pPath: string,
@@ -633,45 +615,36 @@ function oo_readyToValidateTransitionAndSetFullTo(
       if (!to) {
         continue
       }
-      const tFullPath = ooo_getTransitionFullPath(to, statePath, pPath, stateCatalog)
+      const tFullPath = o_getTransitionFullPath(to, statePath, pPath, stateCatalog)
       if (!tFullPath) {
-        throw new Error(`Invalid transition "${to}" in state "${statePath.slice(1)}" (on:"${eType}").`)
+        throw new Error(`createMachine: Invalid transition "${to}" in state "${statePath || '/'}" (on:"${eType}").`)
       }
       if (regionUnder && !tFullPath.startsWith(regionUnder) && tFullPath.startsWith(parallelRoot!)) {
         throw new Error(
-          `Transitions in a parallel state cannot target a different region: on('${eType}', ['${to}', ...]) in state "${statePath.slice(1)}".`,
+          `createMachine: Transitions in a parallel state cannot target a different region: on('${eType}', ['${to}', ...]) in state "${statePath || '/'}".`,
         )
       }
       transition.fullTo = tFullPath
     }
   }
 }
+
 function o_validateTransitionAndSetFullTo(stateCatalog: Map<string, NormalizedStateItemBoth>, regionPaths: string[]) {
-  stateCatalog.forEach((nState, statePath) => {
-    const {
-      def: { builtinEvents, events, invocations },
-    } = nState
-    const validateTransitionAndSetFullTo = oo_readyToValidateTransitionAndSetFullTo(
+  stateCatalog.forEach(({ def }, statePath) => {
+    const { events, internalEvents, pPath } = def
+    const _validateTransitionAndSetFullTo = x_readyToValidateTransitionAndSetFullTo(
       stateCatalog,
       statePath,
-      nState.def.pPath,
+      pPath,
       regionPaths,
     )
-    Object.entries(builtinEvents).forEach(([eType, transitions]) => {
-      validateTransitionAndSetFullTo(transitions, eType)
-    })
     Object.entries(events).forEach(([eType, transitions]) => {
       if (!transitions) return
-      validateTransitionAndSetFullTo(transitions, eType)
+      _validateTransitionAndSetFullTo(transitions, eType)
     })
-    for (const { done, error } of invocations) {
-      if (done) {
-        validateTransitionAndSetFullTo(done, 'done')
-      }
-      if (error) {
-        validateTransitionAndSetFullTo(error, 'error')
-      }
-    }
+    Object.entries(internalEvents).forEach(([eType, internalEvent]) =>
+      _validateTransitionAndSetFullTo(internalEvent!.transitions, eType)
+    )
   })
 }
 
@@ -696,18 +669,20 @@ function getDefinitionAndCatalog<
   const A extends Record<string, Placeholder> = Record<string, Placeholder>,
 >(
   config: MachineConfig<C, E, I, EM, O, G, A, S>,
-  defineStates: (define: Expand<X_DefineStatesParam>) => readonly [X_GlobalEvents<C, E, I, EM, G, A>, D] | readonly [D] | D,
+  defineStates: (
+    define: Expand<X_DefineStatesParam>,
+  ) => readonly [X_GlobalEvents<C, E, I, EM, G, A>, D] | readonly [D] | D,
 ) {
   {
     const configOut = ark_m_config.MachineConfig(config)
     if (configOut instanceof arkType.errors) {
-      throw new Error(`Invalid machine config: ${configOut.summary}`)
+      throw new Error(`createMachine: Invalid machine config: ${configOut.summary}`)
     }
   }
   const rawDefinition = defineStates({
     on,
-    Guard,
-    Action,
+    entryHook,
+    exitHook,
     subStates,
     parallel,
     invoke,
@@ -719,15 +694,16 @@ function getDefinitionAndCatalog<
   {
     const dType = stateDefDict === null ? 'null' : typeof stateDefDict
     if (dType !== 'object') {
-      throw new Error(`Invalid state definition: Expected an object but got ${dType}.`)
+      throw new Error(`createMachine: Invalid state definition: Expected an object but got ${dType}.`)
     }
     if (Object.keys(stateDefDict).length === 0) {
-      throw new Error(`Invalid state definition: The state definition object cannot be empty.`)
+      throw new Error(`createMachine: Invalid state definition: The state definition object cannot be empty.`)
     }
   }
 
   const { initial, states } = transformNormalizedDefinition(stateDefDict, config.initialState)
 
+  // Setup stateCatalog and regionPaths
   const stateCatalog = new Map<string, NormalizedStateItemBoth>()
   const regionPaths: string[] = []
   o_setPPathAndAddCatalog(
@@ -742,11 +718,25 @@ function getDefinitionAndCatalog<
   o_validateTransitionAndSetFullTo(stateCatalog, regionPaths)
 
   const {
-    def: { events, builtinEvents },
-  } = _parseStDefItems(globalEvents || [], '(root)')
+    def: { events, internalEvents },
+  } = x_parseStDefItems(globalEvents || [], '(root)')
+  {
+    const _validateTransitionAndSetFullTo =
+      x_readyToValidateTransitionAndSetFullTo(stateCatalog, '', '', regionPaths)
+    Object.entries(events).forEach(([eType, transitions]) => {
+      if (!transitions) return
+      _validateTransitionAndSetFullTo(transitions, eType)
+    })
+    Object.entries(internalEvents).forEach(([eType, internalEvent]) =>
+      _validateTransitionAndSetFullTo(internalEvent!.transitions, eType)
+    )
+  }
+
   return {
-    definition: { initial, events, builtinEvents, states },
-    stateCatalog, regionPaths
+    definition: { initial, states },
+    globalDefItem: { events, internalEvents },
+    stateCatalog,
+    regionPaths,
   }
 }
 
@@ -762,11 +752,15 @@ export function createMachine<
   const A extends Record<string, Placeholder> = Record<string, Placeholder>,
 >(
   config: Expand<MachineConfig<C, E, I, EM, O, G, A, S>>,
-  defineStates: (define: Expand<X_DefineStatesParam>) => readonly [X_GlobalEvents<C, E, I, EM, G, A>, D] | readonly [D] | D,
+  defineStates: (
+    define: Expand<X_DefineStatesParam>,
+  ) => readonly [X_GlobalEvents<C, E, I, EM, G, A>, D] | readonly [D] | D,
   //defineStates: ( define: Expand<T_DefineStatesParam>) => D,
 ) {
-  const { definition, stateCatalog, regionPaths } =
-    getDefinitionAndCatalog<C, E, I, EM, O, S, D, G, A>(config, defineStates)
+  const { definition, globalDefItem, stateCatalog, regionPaths } = getDefinitionAndCatalog<C, E, I, EM, O, S, D, G, A>(
+    config,
+    defineStates,
+  )
 
   const { name, initContext, output, guards, actions, services } = config
 
@@ -779,6 +773,7 @@ export function createMachine<
     actions: actions || ({} as any),
     services: services || ({} as any),
     definition,
+    globalDefItem: globalDefItem as GlobalStDefItem<E['type']>,
     stateCatalog,
     regionPaths,
   }

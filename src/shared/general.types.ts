@@ -12,6 +12,9 @@ export type IsAny<T> = 0 extends (1 & T) ? true : false;
 export type NestedArray<T> = (T | NestedArray<T>)[]
 export type RecursiveRecord<T = never> = { [key: string]: RecursiveRecord<T> | T }
 export type Mutable<T> = { -readonly [K in keyof T]: T[K] }
+export type KeysWithoutUnknown<T extends object> = {
+  [K in keyof T]: unknown extends T[K] ? never : K
+}[keyof T]
 
 type Ary2Dict<T extends readonly Record<PropertyKey, any>[], K extends PropertyKey> = Readonly<{
   [P in T[number]as P[K]]: P

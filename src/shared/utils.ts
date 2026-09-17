@@ -44,8 +44,10 @@ export function stringifyCircular(target: any) {
   })
 }
 
+
 // == object 関係 ==
 
+// NOTE: 元のオブジェクトそのものを freeze する。同一性 （===） は変わらない
 export function deepFreeze<T>(obj: T): Readonly<T> {
   if (obj === null || (typeof obj !== "object" && typeof obj !== "function")) {
     return obj
@@ -86,11 +88,11 @@ export function defineFixedProperty<T extends object, K extends keyof T>(
   });
 }
 
-// NOTE: ES2022 なら Object.hasOwn を使う方がいい
-// biome-ignore lint: x
-export function hasOwnProperty(obj: object, key: string) {
-  // biome-ignore lint: x
-  return Object.prototype.hasOwnProperty.call(obj, key)
+
+export function isPlainObject(obj: unknown): obj is object {
+  if (obj === null || typeof obj !== "object") return false
+  const proto = Object.getPrototypeOf(obj)
+  return proto === Object.prototype || proto === null
 }
 
 
@@ -106,10 +108,13 @@ export function parentPathOf(statePath: string) {
   return statePath.slice(0, statePath.lastIndexOf(ST_DELIM))
 }
 export function splitStPath(statePath: string) {
+  if (statePath[0] !== '/') {
+    throw new Error(`path must start with '/': "${statePath}"`)
+  }
   return statePath.slice(1).split(ST_DELIM)
 }
 // paths は '/' から始まる文字列
-export function calcCommonPathPrefix(paths: string[]) {
+export function deriveCommonPathPrefix(paths: string[]) {
   if (paths.length < 2) return paths?.[0] || ''
   const model = paths[0]!
   const rest = paths.slice(1)

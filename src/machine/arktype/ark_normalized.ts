@@ -1,55 +1,57 @@
 import { type } from 'arktype'
-import { BUILTIN_ETYPES } from '../m.types'
-import { AnyFn } from "./arktype.internal";
+import { ActionElement, AnyFn } from './arktype.internal'
 
-const NormalizedActionBody = type({ body: type.or(AnyFn, 'string'), 'params?': 'unknown', 'isEnqueue?': 'boolean' })
+const NormalizedActions = ActionElement.array()
 
-const o_NormalizedTransitions = type({
+const x_NormalizedTransitions = type({
   'to?': 'string',
   'fullTo?': 'string',
-  actions: NormalizedActionBody.array(),
-  guards: NormalizedActionBody.array(),
+  actions: NormalizedActions,
+  guards: NormalizedActions,
 }).array()
+
 const o_NormalizedInvocations = type({
-  'id?': 'string',
+  'id': 'string',
   'input?': AnyFn,
   src: type.or(AnyFn, 'string'),
-  'done?': o_NormalizedTransitions,
-  'error?': o_NormalizedTransitions,
+  'done?': x_NormalizedTransitions,
+  'error?': x_NormalizedTransitions,
 }).array()
+const o_InternalEvent = type({
+  'cond?': AnyFn,
+  transitions: x_NormalizedTransitions,
+})
 const NStateItemDef = type({
   '+': 'reject',
   pPath: 'string',
   final: 'boolean',
-  tags: 'Set',
+  //tags: 'Set',
+  entryHooks: NormalizedActions.or('null'),
+  exitHooks: NormalizedActions.or('null'),
   invocations: o_NormalizedInvocations,
-  entryHook: NormalizedActionBody.or('null'),
-  exitHook: NormalizedActionBody.or('null'),
-  builtinEvents: BUILTIN_ETYPES.reduce(
-    (acc, et) => {
-      acc[`${et}?`] = o_NormalizedTransitions
-      return acc
-    },
-    {} as { [K in typeof BUILTIN_ETYPES[number]as `${K}?`]: typeof o_NormalizedTransitions },
-  ),
-  events: { '[string]': o_NormalizedTransitions },
+  internalEvents: { '[string]': o_InternalEvent },
+  events: { '[string]': x_NormalizedTransitions },
 })
 
-export const SubStNormalizedDefinition = type([{
-  initial: 'string | undefined',
-  states: {
-    '[string]': {
-      def: NStateItemDef,
-      sub: 'null | this',
+export const SubStNormalizedDefinition = type([
+  {
+    'dType?': '"normal"',
+    initial: 'string | undefined',
+    states: {
+      '[string]': {
+        def: NStateItemDef,
+        sub: 'null | this',
+      },
     },
   },
-}, '|', {
-  nType: '"parallel"',
-  regions: {
-    '[string]': {
-      def: NStateItemDef,
-      sub: 'null | this',
+  '|',
+  {
+    dType: '"parallel"',
+    states: {
+      '[string]': {
+        def: NStateItemDef,
+        sub: 'null | this',
+      },
     },
   },
-}])
-
+])

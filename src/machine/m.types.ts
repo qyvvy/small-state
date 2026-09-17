@@ -1,22 +1,28 @@
-import type { AnyFn, Duplicate, Expand, Placeholder } from '../shared/general.types'
+import type { AnyFn, Duplicate, Expand, Placeholder, Values } from '../shared/general.types'
 
 export type ExtractEvent<E extends EventBody, Et extends E['type']> =
   Et extends BuiltinEType ? E : E extends { type: Et } ? E : Et extends E['type'] ? E : never
 
 
+export const EntrySymbol: unique symbol = Symbol('Entry')
+export const ExitSymbol: unique symbol = Symbol('Exit')
 export const SubStatesSymbol: unique symbol = Symbol('SubStates')
 export const ParallelSymbol: unique symbol = Symbol('Parallel')
-export const TransitionSymbol: unique symbol = Symbol('Transition')
 export const InvokeSymbol: unique symbol = Symbol('Invoke')
-export const InvokeDoneSymbol: unique symbol = Symbol('InvokeDone')
-export const InvokeErrorSymbol: unique symbol = Symbol('InvokeDone')
+export const InternalEventSymbol: unique symbol = Symbol('InternalEvent')
 
 
 //export const BUILTIN_ETYPES = [':ctxChanged:', ':childDone:'] as const
 export const BUILTIN_ETYPES = [':always:', ':childDone:'] as const
 const BuiltinETypeSet = new Set<string>(BUILTIN_ETYPES)
 export type BuiltinEType = (typeof BUILTIN_ETYPES)[number]
-export const isBuiltinEType = (v: string): v is BuiltinEType => BuiltinETypeSet.has(v)
+export const isBuiltinEType = (v: string): v is BuiltinEType =>
+  BuiltinETypeSet.has(v)
+
+//export const INTERNAL_ETYPES = [':always:', ':childDone:', 'done', 'error'] as const
+//export type InternalEType = (typeof INTERNAL_ETYPES)[number]
+export type InternalEType = BuiltinEType | `${string}/done` | `${string}/error`
+export type InternalEventBody = { type: InternalEType;[key: string]: any }
 
 export type MContext = Record<string, any>
 export type EventBody = { type: string;[key: string]: any }
@@ -24,48 +30,95 @@ export type EmittedEvent = { type: string;[key: string]: any }
 export type StateName = string
 
 // type 以外のプロパティを持たない EventBody の型を抽出する
-export type PureEventType<E extends EventBody> =
+export type PureETypeString<E extends EventBody> =
   E extends unknown ? Exclude<keyof E, "type"> extends never ? E['type'] : never : any
 
 export type FnBaseParams<C extends MContext, Ex extends EventBody, I, Additional = unknown, P = any> = [
   arg: Expand<{ c: C; context: C; e: Ex; event: Ex; input: I } & Additional>,
   params: P
 ]
-export type ActionFnParams<C extends MContext, Ex extends EventBody, I, EM extends EmittedEvent, P = any> =
-  FnBaseParams<C, Ex, I, { update: UpdateFn<C>, emit: EmitFn<EM> }, P>
+export type ActionFnParams<
+  C extends MContext,
+  Ex extends EventBody,
+  I,
+  EM extends EmittedEvent,
+  G extends Record<string, Placeholder>,
+  A extends Record<string, Placeholder>,
+> = FnBaseParams<C, Ex, I,
+  {
+    check: CheckFn<C, Ex, I, G>
+    enqueue: EnqueueFn<C, Ex, I, EM, A>
+    update: UpdateFn<C>
+    emit: (emittedEvent: EM) => unknown
+  }
+>
+export type LimitedActionFnParams<
+  C extends MContext,
+  E extends EventBody,
+  I,
+  EM extends EmittedEvent,
+  P = any
+> = FnBaseParams<C, E, I, {
+  update: UpdateFn<C>,
+  emit: (emittedEvent: EM) => unknown
+}, P>
 
+export type CheckFn<
+  C extends MContext, Ex extends EventBody, I, G extends Record<string, Placeholder>
+> = {
+  (type: Values<{ [K in keyof G & string as unknown extends G[K] ? never : K]: { [K3 in K]: ParamsInput<G[K], C, Ex, I> } }>): boolean
+  <Gk extends keyof G & string | never>(
+    type: Gk, ...args: ParamsInputArgsOf<G, Gk, C, Ex, I>
+  ): boolean
+}
 
-type X_NormalizedGuardBody = { body: AnyFn<boolean> | string, params?: unknown | AnyFn }
-type X_NormalizedActionBody = { body: AnyFn | string, params?: unknown | AnyFn, isEnqueue?: true }
+export type EnqueueFn<
+  C extends MContext, Ex extends EventBody, I, EM extends EmittedEvent, A extends Record<string, Placeholder>
+> = {
+  (type: Values<{ [K in keyof A & string as unknown extends A[K] ? never : K]: { [K2 in K]: ParamsInput<A[K], C, Ex, I> } }>): void
+  <Ak extends keyof A & string | never>(type: Ak, ...args: ParamsInputArgsOf<A, Ak, C, Ex, I>): void
+  (fn: (arg: LimitedActionFnParams<C, Ex, I, EM>[0]) => void): void
+}
+
+type X_NormalizedGuard<C extends MContext = any, Ex extends EventBody = any, I = any> =
+  ((arg: FnBaseParams<C, Ex, I>[0]) => boolean) | string | Record<string, ParamsInput<unknown, C, Ex, I>>
+export type NormalizedAction<
+  C extends MContext = any, Ex extends EventBody = any, I = any, EM extends EmittedEvent = any,
+  G extends Record<string, Placeholder> = any,
+  A extends Record<string, Placeholder> = any,
+> =
+  ((arg: ActionFnParams<C, Ex, I, EM, G, A>[0]) => unknown) | string | Record<string, ParamsInput<unknown, C, Ex, I>>
 export type NormalizedTransition = {
   to?: StateName
-  fullTo?: StateName
-  guards: X_NormalizedGuardBody[]
-  actions: X_NormalizedActionBody[]
+  fullTo?: string
+  guards: X_NormalizedGuard[]
+  actions: NormalizedAction[]
 }
 
 export type NormalizedInvocation = {
-  id?: string
+  id: string
   input?: AnyFn
   src: AnyFn | string
-  done?: NormalizedTransition[]
-  error?: NormalizedTransition[]
+  //done?: NormalizedTransition[]
+  //error?: NormalizedTransition[]
 }
 
-type O_NormalizedOneAction = {
-  guards: X_NormalizedGuardBody[]
-  actions: X_NormalizedActionBody[]
+export type InternalEPayload = { path: string }
+type InternalEvent = {
+  cond?: (payload: InternalEPayload) => boolean
+  transitions: NormalizedTransition[]
 }
+
 export type NStateItemDef<Et extends string> = {
   pPath: string
   final: boolean
-  tags: Set<string>
-  entryHook: O_NormalizedOneAction | null
-  exitHook: O_NormalizedOneAction | null
+  //tags: Set<string>
+  entryHooks: NormalizedAction[] | null
+  exitHooks: NormalizedAction[] | null
   //always: O_NormalizedTransition[]
   //delays: Array<O_NormalizedTransition & { after: number }>
   invocations: Array<NormalizedInvocation>
-  builtinEvents: { [K in BuiltinEType]?: NormalizedTransition[] }
+  internalEvents: { [K in InternalEType]?: InternalEvent }
   events: { [K in Et]?: NormalizedTransition[] }
 }
 
@@ -80,27 +133,31 @@ export type ParallelNormalizedStateItem = {
 export type NormalizedStateItemBoth = NormalizedStateItem | ParallelNormalizedStateItem
 
 export type NormalizedDefinition = {
+  dType?: 'normal'
   initial: string | undefined,
   states: Record<string, NormalizedStateItem>
 }
 export type ParallelNormalizedDefinition = {
-  nType: 'parallel'
-  regions: Record<string, ParallelNormalizedStateItem>
+  dType: 'parallel'
+  states: Record<string, ParallelNormalizedStateItem>
 }
 
-export type ParamsArgOf<
-  R extends Record<string, Placeholder>,
-  Rk extends keyof R,
+export type ParamsInput<P, C extends MContext, Ex extends EventBody, I> =
+  P | ((arg: FnBaseParams<C, Ex, I>[0]) => P)
+
+export type ParamsInputArgsOf<
+  IR extends Record<string, Placeholder>,
+  IRk extends keyof IR,
   C extends MContext,
   Ex extends EventBody,
   I,
-> = unknown extends R[Rk]
+> = unknown extends IR[IRk]
   ? []
-  : [params: R[Rk] | ((arg: FnBaseParams<C, Ex, I>[0]) => R[Rk])]
+  : [params: ParamsInput<IR[IRk], C, Ex, I>]
 
 // TODO: もし Cが narrow されるのなら Duplicate する
 export type UpdateFnParam<C extends MContext> = {
-  [K in keyof C]?: C[K] | Promise<C[K]> | (() => (C[K] | Promise<C[K]>))
+  [K in keyof C]?: C[K] | (() => (C[K]))
 }
 export type UpdateFn<C extends MContext> = (updates: UpdateFnParam<C>) => unknown
 
@@ -123,8 +180,13 @@ export type MachineConfig<
   initContext?: (input: I) => C
   output?: (arg: FnBaseParams<C, E, I>[0]) => O // マシンが最終状態になったときに実行される
   guards?: { [K in keyof G]: (arg: FnBaseParams<C, E, I>[0], params: G[K]) => boolean },
-  actions?: { [K in keyof A]: (arg: FnBaseParams<C, E, I, { update: UpdateFn<C> }>[0], params: A[K]) => unknown },
+  actions?: { [K in keyof A & string]: (arg: LimitedActionFnParams<C, E, I, EM>[0], params: A[K]) => unknown },
   services?: S
+}
+
+export type GlobalStDefItem<Et extends string> = {
+  events: { [K in Et]?: NormalizedTransition[] }
+  internalEvents: { [K in InternalEType]?: InternalEvent }
 }
 
 export const MachineSymbol: unique symbol = Symbol('Machine')
@@ -142,13 +204,14 @@ export type Machine<
   [MachineSymbol]: true,
   name: string,
   initContext?: (input: I) => C
-  output?: (arg: Omit<FnBaseParams<C, E, I, unknown>[0], 'jot'>) => O // マシンが最終状態になったときに実行される
-  guards: { [K in keyof G]: (arg: FnBaseParams<C, E, I>[0], params: G[K]) => boolean }
+  output?: (arg: FnBaseParams<C, E, I, unknown>[0]) => O // マシンが最終状態になったときに実行される
+  guards: { [K in keyof G]: (arg: FnBaseParams<C, E | InternalEventBody, I>[0], params: G[K]) => boolean }
   actions: {
-    [K in keyof A]: (arg: FnBaseParams<C, E, I, { update: UpdateFn<C> }>[0], params: A[K]) => unknown
+    [K in keyof A]: (arg: LimitedActionFnParams<C, E | InternalEventBody, I, EM>[0], params: A[K]) => unknown
   }
   services: S
   definition: ND
+  globalDefItem: GlobalStDefItem<E['type']>
   stateCatalog: Map<string, NormalizedStateItemBoth>
   regionPaths: string[]
 }
