@@ -1,6 +1,6 @@
 {
-  "name": "min-state",
-  "version": "0.1.0",
+  "name": "small-state",
+  "version": "0.0.0",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "dependencies": {

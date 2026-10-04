@@ -3,7 +3,7 @@
   "configVersion": 0,
   "workspaces": {
     "": {
-      "name": "min-state",
+      "name": "small-state",
       "dependencies": {
         "arktype": "^2.2.0",
         "cdate": "^0.0.7",
