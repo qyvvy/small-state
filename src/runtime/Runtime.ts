@@ -1,5 +1,3 @@
-//import { Machine } from "../machine/Machine";
-
 import type {
   EmittedEvent,
   EventBody,
@@ -11,9 +9,10 @@ import type {
   PureETypeString,
 } from '../machine/m.types'
 import { ST_DELIM } from '../shared/constants'
-import type { Placeholder, RecursiveRecord } from '../shared/general.types'
+import type { Placeholder } from '../shared/general.types'
 import { defineFixedProperty } from '../shared/utils'
 import { MailBox } from './MailBox'
+import type { StateRoute } from './r.types'
 import { initRuntime, macrostep } from './runtime_step'
 import { readyAction } from './runtime_step.core'
 import { runtimeUtils } from './runtime_utils'
@@ -69,8 +68,7 @@ class Runtime<
   readonly machine!: Machine<C, E, I, EM, O, G, A, S, ND>
   readonly #input!: I
   #realContext!: C
-  #crrStateTree: RecursiveRecord = Object.create(null)
-  //#crrStates: CurrentStates = []
+  #crrStates: StateRoute = []
   #sentQueue: MailBox<E | InternalEventBody, InternalEPayload> = new MailBox(this.#processSentEvent.bind(this))
   #enqueueEvent = this.#sentQueue.enqueue.bind(this.#sentQueue)
   #observers = new Set<Observer<C, O>>()
@@ -115,7 +113,7 @@ class Runtime<
       this.#realContext,
       this.#input,
       this.#emit,
-      this.#crrStateTree,
+      this.#crrStates,
       this.machine,
       this.#enqueueEvent,
     )
@@ -150,7 +148,7 @@ class Runtime<
   }
 
   #processSentEvent<Ex extends E | InternalEventBody>(event: Ex, internalEPayload?: InternalEPayload) {
-    const { guards, actions, globalDefItem } = this.machine
+    const { guards, actions, topLvDefItem } = this.machine
     const actionRunner = readyAction<C, E, I, EM, G, A, Ex>(
       this.#realContext,
       event,
@@ -163,15 +161,15 @@ class Runtime<
     const result = macrostep(
       event.type,
       internalEPayload,
-      this.#crrStateTree,
+      this.#crrStates,
       actionRunner,
       this.machine,
       this.#enqueueEvent,
-      globalDefItem,
+      topLvDefItem,
     )
     {
-      const { context, stateTree, hasTransitioned } = result
-      this.#crrStateTree = stateTree
+      const { context, crrStates, hasTransitioned } = result
+      this.#crrStates = crrStates
 
       this.#buildAndSetSnapshot(context, hasTransitioned)(event as E)
     }
@@ -194,7 +192,8 @@ class Runtime<
   #buildAndSetSnapshot(realContext: C, hasTransitioned: boolean, runtimeStatus?: RuntimeStatus) {
     const oldSnapshot = this.#snapshot
 
-    const states = hasTransitioned ? makeStateList(this.#crrStateTree) : oldSnapshot.states
+    const crrStates = this.#crrStates
+    const states = !hasTransitioned ? oldSnapshot.states : !crrStates.length ? [] : makeStateList(this.#crrStates, 0, '')
     let { context } = oldSnapshot
     const contextUpdated = realContext !== this.#realContext
     if (contextUpdated) {
@@ -249,16 +248,16 @@ class Runtime<
   }
 }
 
-function makeStateList(stateNode: RecursiveRecord, parent: string = '') {
+function makeStateList(stateRoute: StateRoute, idx: number, parent: string) {
+  if (idx >= stateRoute.length) return [parent]
+  const el = stateRoute[idx]!
+  if (!('parallel' in el)) {
+    return makeStateList(stateRoute, idx + 1, `${parent}${ST_DELIM}${el}`)
+  }
+  const { parallel, regions } = el
   const ret: string[] = []
-  for (const stateName in stateNode) {
-    const pth = `${parent}${ST_DELIM}${stateName}`
-    const children = makeStateList(stateNode[stateName]!, pth)
-    if (children.length) {
-      ret.push(...children)
-    } else {
-      ret.push(pth)
-    }
+  for (const key in regions) {
+    ret.push(...makeStateList(regions[key]!, 0, `${parent}${ST_DELIM}${parallel}${ST_DELIM}${key}`))
   }
   return ret
 }

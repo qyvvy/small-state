@@ -1,21 +1,16 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, jest, mock, test } from 'bun:test'
-import type {
-  NormalizedDefinition,
-  NormalizedStateItemBoth,
-} from '../../machine/m.types'
-import type { RecursiveRecord } from '../../shared/general.types'
-import { deriveCommonPathPrefix } from '../../shared/utils'
+import type { NormalizedDefinition, NormalizedStateItemBoth, TopLvStDefItem } from '../../machine/m.types'
 import {
   __test__,
-  deleteNodeFromStateTree,
   deriveEventTransition,
-  genExitPaths,
+  genExitPathsAndDeleteFromCrrStates,
   readyAction,
-  updateStateTreeForEntry,
+  updateStateRouteForEntry,
 } from '../runtime_step.core'
 import { runtimeUtils } from '../runtime_utils'
+import { objectifyRouteString } from './helper'
 
-const { o_readyToGetParallelPathIfExited, x_removeConflictedTransitions, oo_adjustSrcPathForParallel } = __test__
+const { x_removeConflictedTransitions, x_findDeepestTransitions, o_deriveLowestCommonAncestor } = __test__
 
 const DFL_NST_ITEM_DEF = {
   pPath: '',
@@ -30,6 +25,70 @@ const DFL_NST_ITEM_DEF = {
 
 describe('runtime_step.core', () => {
   beforeAll(async () => { })
+
+  describe('o_deriveLowestCommonAncestor', () => {
+    // 第一引数を基準として第二引数との共通部分のうち一番長いものを返す
+    test('0:', async () => {
+      expect(
+        o_deriveLowestCommonAncestor('/a/aa/aa1/aa1c', [
+          '/a/aa/aa1/aa1a/aa1a1/aa1a1a',
+          '/a/aa/aa1/aa1a/aa1a2/aa1a2a',
+          '/a/aa/aa2/aa2b/aa2b1/aa2b1a/aa2b1aa',
+          '/a/aa/aa2/aa2b/aa2b2',
+          '/a/aa/aa2/aa2b/aa2b3/aa2b3a',
+        ]),
+      ).toBe('/a/aa/aa1')
+    })
+
+    test('0:完全部分集合には非対応', async () => {
+      expect(
+        o_deriveLowestCommonAncestor('/a/aa', [
+          '/a/aa/aa2/aa2b/aa2b1/aa2b1a/aa2b1aa',
+          '/a/aa/aa2/aa2b/aa2b2',
+          '/a/aa/aa2/aa2b/aa2b3/aa2b3a',
+        ]),
+      ).not.toBe('/a/aa') // /a になる
+    })
+
+    test('0:model と一致する最長のパスを返す', async () => {
+      expect(
+        o_deriveLowestCommonAncestor('/a/aa/aa1/aa1a/aa1ab', [
+          '/b/ba',
+          '/a/aa/aa1',
+          '/a/aa/aa1/aa1a',
+          '/a/aa/aa1/aa1c',
+        ]),
+      ).toBe('/a/aa/aa1')
+    })
+    test('1:同時に最長が決まった場合', async () => {
+      expect(o_deriveLowestCommonAncestor('/a/aa/aa1/aa1a/aa1ab', ['/a/aa/aa1/x', '/a/aa/aa1/y', '/a/aa/aa1/z'])).toBe(
+        '/a/aa/aa1',
+      )
+    })
+    test('0:', async () => {
+      expect(o_deriveLowestCommonAncestor('/aa/bb', ['/aa/cc', '/aaa/a'])).toBe('/aa')
+    })
+    test('0: 1段目のステートが不一致(超過)', async () => {
+      expect(o_deriveLowestCommonAncestor('/aa/bb', ['/aaa/bb'])).toBe('')
+    })
+    test('0: 2段目のステートが不一致(不足)', async () => {
+      expect(o_deriveLowestCommonAncestor('/aa/bb/ccc', ['/aa/b/cc'])).toBe('/aa')
+    })
+    describe('2:どちらかがどちらかの完全部分一致になるケースは未対応', () => {
+      test('2:model が部分', async () => {
+        expect(o_deriveLowestCommonAncestor('/a/aa', ['/a/aa/aa1'])).toBe('/a')
+      })
+      test('2:comparands が部分', async () => {
+        expect(o_deriveLowestCommonAncestor('/a/aa/aa1', ['/a/aa'])).toBe('/a')
+      })
+      test('2.1: デリミタの手前までを判定（末尾のステートは対象外）', async () => {
+        expect(o_deriveLowestCommonAncestor('/aa/bb', ['/aa/bb'])).toBe('/aa')
+      })
+      test('2.2: デリミタの手前までを判定（末尾のステートは対象外）', async () => {
+        expect(o_deriveLowestCommonAncestor('/aa/bb', ['/aa/bb', '/aa/bb'])).toBe('/aa')
+      })
+    })
+  })
 
   describe('readyAction()', () => {
     describe('1: check/enqueue, emit, update', () => {
@@ -164,71 +223,121 @@ describe('runtime_step.core', () => {
     })
   })
 
-  describe('genExitPaths()', () => {
-    test('1: crrStateTree に指定したパスがないときにはエラー', async () => {
-      expect(() => [...genExitPaths('/a/ab', { a: {} })]).toThrow(/is not found/)
+  describe('genExitPathsAndDeleteFromCrrStates()', () => {
+    // 第二引数で示したパスより下位のパスを stateRoute から削除しそれらのパスを深いところから順に yield する
+    describe('非parallel', () => {
+      test('0:lcaがルートのとき("/" でなくて "" と指定)', async () => {
+        const stateRoute = objectifyRouteString(['a', 'ab', 'abc'])
+        const result = genExitPathsAndDeleteFromCrrStates(stateRoute, '')
+        expect([...result]).toEqual(['/a/ab/abc', '/a/ab', '/a'])
+        expect(stateRoute).toEqual([])
+      })
+
+      test('0:', async () => {
+        const stateRoute = objectifyRouteString(['a', 'ab', 'abc'])
+        const result = genExitPathsAndDeleteFromCrrStates(stateRoute, '/a')
+        expect([...result]).toEqual(['/a/ab/abc', '/a/ab'])
+        expect(stateRoute).toEqual([Object('a')])
+      })
+
+      test('0:', async () => {
+        const stateRoute = objectifyRouteString(['a', 'ab', 'abc'])
+        const result = genExitPathsAndDeleteFromCrrStates(stateRoute, '/a/ab/abc')
+        expect([...result]).toEqual([])
+        expect(stateRoute).toEqual(objectifyRouteString(['a', 'ab', 'abc']))
+      })
+
+      test('0:lca が route を超えると例外を投げる', async () => {
+        const stateRoute = objectifyRouteString(['a', 'ab', 'abc'])
+        expect(() => [...genExitPathsAndDeleteFromCrrStates(stateRoute, '/a/ab/abc/abcd')]).toThrow(/is not found/)
+      })
+
+      test('0:lca が route に見つからないと例外を投げる', async () => {
+        const stateRoute = objectifyRouteString(['a', 'ab', 'abc'])
+        expect(() => [...genExitPathsAndDeleteFromCrrStates(stateRoute, '/a/x')]).toThrow(/is not found/)
+      })
     })
 
-    test('2: 指定されたパス以下に続くものがないときには指定されたパスのみを返す', async () => {
-      expect([...genExitPaths('/a/ab', { a: { aa: {}, ab: {} } })]).toEqual(['/a/ab'])
-    })
+    describe('parallel', () => {
+      test('1:', async () => {
+        const stateRoute = objectifyRouteString([
+          'a',
+          { parallel: 'ab', regions: { ab1: ['ab1a', 'ab1ab'], ab2: [], ab3: ['ab3b'] } },
+        ])
+        const result = genExitPathsAndDeleteFromCrrStates(stateRoute, '/a')
+        expect([...result]).toEqual([
+          '/a/ab/ab1/ab1a/ab1ab',
+          '/a/ab/ab1/ab1a',
+          '/a/ab/ab1',
+          '/a/ab/ab2',
+          '/a/ab/ab3/ab3b',
+          '/a/ab/ab3',
+          '/a/ab',
+        ])
+        expect(stateRoute).toEqual(objectifyRouteString(['a']))
+      })
 
-    test('3: 指定されたパス以下のパスを深いものから列挙する', async () => {
-      expect([
-        ...genExitPaths('/a/ab', {
-          a: { aa: {}, ab: { aba: {}, abb: { abba: { abbaa: {} }, abbb: {}, abbc: {} }, abc: {} } },
-        }),
-      ]).toEqual([
-        '/a/ab/aba',
-        '/a/ab/abb/abba/abbaa',
-        '/a/ab/abb/abba',
-        '/a/ab/abb/abbb',
-        '/a/ab/abb/abbc',
-        '/a/ab/abb',
-        '/a/ab/abc',
-        '/a/ab',
-      ])
+      test('2:parallelを指定', async () => {
+        const stateRoute = objectifyRouteString([
+          'a',
+          { parallel: 'ab', regions: { ab1: ['ab1a', 'ab1ab'], ab2: [], ab3: ['ab3b'] } },
+        ])
+        const result = genExitPathsAndDeleteFromCrrStates(stateRoute, '/a/ab')
+        expect([...result]).toEqual([
+          '/a/ab/ab1/ab1a/ab1ab',
+          '/a/ab/ab1/ab1a',
+          '/a/ab/ab1',
+          '/a/ab/ab2',
+          '/a/ab/ab3/ab3b',
+          '/a/ab/ab3',
+        ])
+        expect(stateRoute).toEqual(objectifyRouteString(['a', { parallel: 'ab', regions: {} }]))
+      })
+
+      test('3:regionを指定', async () => {
+        const stateRoute = objectifyRouteString([
+          'a',
+          { parallel: 'ab', regions: { ab1: ['ab1a', 'ab1ab'], ab2: [], ab3: ['ab3b'] } },
+        ])
+        const result = genExitPathsAndDeleteFromCrrStates(stateRoute, '/a/ab/ab1')
+        expect([...result]).toEqual(['/a/ab/ab1/ab1a/ab1ab', '/a/ab/ab1/ab1a'])
+        expect(stateRoute).toEqual(
+          objectifyRouteString(['a', { parallel: 'ab', regions: { ab1: [], ab2: [], ab3: ['ab3b'] } }]),
+        )
+      })
+
+      test('4:regionの子を指定', async () => {
+        const stateRoute = objectifyRouteString([
+          'a',
+          { parallel: 'ab', regions: { ab1: ['ab1a', 'ab1ab'], ab2: [], ab3: ['ab3b'] } },
+        ])
+        const result = genExitPathsAndDeleteFromCrrStates(stateRoute, '/a/ab/ab1/ab1a')
+        expect([...result]).toEqual(['/a/ab/ab1/ab1a/ab1ab'])
+        expect(stateRoute).toEqual(
+          objectifyRouteString(['a', { parallel: 'ab', regions: { ab1: ['ab1a'], ab2: [], ab3: ['ab3b'] } }]),
+        )
+      })
     })
   })
 
-  describe('deleteNodeFromStateTree: 指定されたパスの末端を削除する', () => {
-    test('1:', async () => {
-      const target: RecursiveRecord = { a: {} }
-      deleteNodeFromStateTree(['a'], target)
-      expect(target).toEqual({})
-    })
-
-    test('2:', async () => {
-      const target: RecursiveRecord = { a: { aa: { aaa: {} } } }
-      deleteNodeFromStateTree(['a', 'aa', 'aaa'], target)
-      expect(target).toEqual({ a: { aa: {} } })
-    })
-
-    test('3:', async () => {
-      const target: RecursiveRecord = { a: { aa: {}, ab: {} } }
-      deleteNodeFromStateTree(['a', 'aa'], target)
-      expect(target).toEqual({ a: { ab: {} } })
-    })
-  })
-
-  describe('updateStateTreeForEntry()', () => {
+  describe('updateStateRouteForEntry()', () => {
     test('1: 新しいステートの内新規に入るステートについて浅い階層から順に定義を返す', async () => {
-      const destStates = [['a', 'ab', 'aba']] // 新しいステート
-      const crrStateTree: RecursiveRecord = { a: {} }
+      const destSplittedStates = [['a', 'ab', 'aba']] // /a/ab/aba
+      const crrStates = objectifyRouteString(['a'])
       const results = [
-        ...updateStateTreeForEntry(destStates, crrStateTree, {
+        ...updateStateRouteForEntry(destSplittedStates, crrStates, {
           initial: 'a',
-          states: {
+          stateOf: {
             a: {
               def: { ...DFL_NST_ITEM_DEF, entryHooks: ['a'] },
               sub: {
                 initial: 'aa',
-                states: {
+                stateOf: {
                   aa: {
                     def: { ...DFL_NST_ITEM_DEF, entryHooks: ['aa'] },
                     sub: {
                       initial: 'aaa',
-                      states: {
+                      stateOf: {
                         aaa: {
                           def: { ...DFL_NST_ITEM_DEF, entryHooks: ['aaa'] },
                           sub: null,
@@ -240,7 +349,7 @@ describe('runtime_step.core', () => {
                     def: { ...DFL_NST_ITEM_DEF, entryHooks: ['ab'] },
                     sub: {
                       initial: 'aba',
-                      states: {
+                      stateOf: {
                         aba: {
                           def: { ...DFL_NST_ITEM_DEF, entryHooks: ['aba'] },
                           sub: null,
@@ -255,45 +364,46 @@ describe('runtime_step.core', () => {
         }),
       ]
 
-      expect(results.map(([stateName]) => stateName)).toEqual(['ab', 'aba'])
+      expect(results.map(([_, { stateName }]) => stateName)).toEqual(['ab', 'aba'])
+      expect(results.map(([_, { isRegionChild }]) => isRegionChild)).toEqual([false, false])
 
-      expect(crrStateTree, 'crrStateTree に新しい経路を追加する（削除は行わない）').toEqual({ a: { ab: { aba: {} } } })
+      expect(crrStates, 'crrStateTree に新しい経路を追加する（削除は行わない）').toEqual(
+        objectifyRouteString(['a', 'ab', 'aba']),
+      )
     })
 
     test('2: fullToSplittees 以下にサブステートがある場合、その末端までが新しいステートとなる', async () => {
-      const destStates = [['a']] // これより下に子ステートがある
-      const crrStateTree: RecursiveRecord = {}
-      expect(
-        [
-          ...updateStateTreeForEntry(destStates, crrStateTree, {
-            initial: 'a',
-            states: {
-              a: {
-                def: { ...DFL_NST_ITEM_DEF, entryHooks: ['a'] },
-                sub: {
-                  initial: 'ab',
-                  states: {
-                    aa: {
-                      def: { ...DFL_NST_ITEM_DEF, entryHooks: ['aa'] },
-                      sub: {
-                        initial: 'aaa',
-                        states: {
-                          aaa: {
-                            def: { ...DFL_NST_ITEM_DEF, entryHooks: ['aaa'] },
-                            sub: null,
-                          },
+      const destSplittedStates = [['a']] // これより下に子ステートがある
+      const crrStates = objectifyRouteString(['a'])
+      const results = [
+        ...updateStateRouteForEntry(destSplittedStates, crrStates, {
+          initial: 'a',
+          stateOf: {
+            a: {
+              def: { ...DFL_NST_ITEM_DEF, entryHooks: ['a'] },
+              sub: {
+                initial: 'ab',
+                stateOf: {
+                  aa: {
+                    def: { ...DFL_NST_ITEM_DEF, entryHooks: ['aa'] },
+                    sub: {
+                      initial: 'aaa',
+                      stateOf: {
+                        aaa: {
+                          def: { ...DFL_NST_ITEM_DEF, entryHooks: ['aaa'] },
+                          sub: null,
                         },
                       },
                     },
-                    ab: {
-                      def: { ...DFL_NST_ITEM_DEF, entryHooks: ['ab'] },
-                      sub: {
-                        initial: 'aba',
-                        states: {
-                          aba: {
-                            def: { ...DFL_NST_ITEM_DEF, entryHooks: ['aba'] },
-                            sub: null,
-                          },
+                  },
+                  ab: {
+                    def: { ...DFL_NST_ITEM_DEF, entryHooks: ['ab'] },
+                    sub: {
+                      initial: 'aba',
+                      stateOf: {
+                        aba: {
+                          def: { ...DFL_NST_ITEM_DEF, entryHooks: ['aba'] },
+                          sub: null,
                         },
                       },
                     },
@@ -301,27 +411,30 @@ describe('runtime_step.core', () => {
                 },
               },
             },
-          }),
-        ].map(([stateName]) => stateName),
-      ).toEqual(['a', 'ab', 'aba'])
+          },
+        }),
+      ]
 
-      expect(crrStateTree, 'crrStateTree に新しい経路を追加する').toEqual({ a: { ab: { aba: {} } } })
+      expect(results.map(([_, { stateName }]) => stateName)).toEqual(['ab', 'aba'])
+      expect(results.map(([_, { isRegionChild }]) => isRegionChild)).toEqual([false, false])
+
+      expect(crrStates, 'crrStateTree に新しい経路を追加する').toEqual(objectifyRouteString(['a', 'ab', 'aba']))
     })
 
     describe('parallel 1', () => {
       const stateDefinition: NormalizedDefinition = {
         initial: 'a',
-        states: {
+        stateOf: {
           a: {
             def: { ...DFL_NST_ITEM_DEF, entryHooks: ['a'] },
             sub: {
-              dType: 'parallel',
-              states: {
+              dType: 'regions',
+              stateOf: {
                 a1: {
                   def: { ...DFL_NST_ITEM_DEF, entryHooks: ['a1'] },
                   sub: {
                     initial: 'a1a',
-                    states: {
+                    stateOf: {
                       a1a: {
                         def: { ...DFL_NST_ITEM_DEF, entryHooks: ['a1a'] },
                         sub: null,
@@ -337,7 +450,7 @@ describe('runtime_step.core', () => {
                   def: { ...DFL_NST_ITEM_DEF, entryHooks: ['a2'] },
                   sub: {
                     initial: 'a2b',
-                    states: {
+                    stateOf: {
                       a2a: {
                         def: { ...DFL_NST_ITEM_DEF, entryHooks: ['a2a'] },
                         sub: null,
@@ -345,13 +458,13 @@ describe('runtime_step.core', () => {
                       a2b: {
                         def: { ...DFL_NST_ITEM_DEF, entryHooks: ['a2b'] },
                         sub: {
-                          dType: 'parallel',
-                          states: {
+                          dType: 'regions',
+                          stateOf: {
                             a2b1: {
                               def: { ...DFL_NST_ITEM_DEF, entryHooks: ['a2b1'] },
                               sub: {
                                 initial: 'a2b1a',
-                                states: {
+                                stateOf: {
                                   a2b1a: {
                                     def: { ...DFL_NST_ITEM_DEF, entryHooks: ['a2b1a'] },
                                     sub: null,
@@ -367,7 +480,7 @@ describe('runtime_step.core', () => {
                               def: { ...DFL_NST_ITEM_DEF, entryHooks: ['a2b2'] },
                               sub: {
                                 initial: undefined,
-                                states: {},
+                                stateOf: {},
                               },
                             },
                           },
@@ -382,114 +495,804 @@ describe('runtime_step.core', () => {
         },
       }
 
-      test('3.1: ステート遷移先が parallel である場合、子がすべて対象になる', async () => {
+      test('3.1: ステート遷移先が parallel である場合、子がすべて対象になる', () => {
         const destStates = [['a']] // これより下に子ステートがある
-        const crrStateTree: RecursiveRecord = { a: {} }
-        expect(
-          [...updateStateTreeForEntry(destStates, crrStateTree, stateDefinition)].map(([stateName]) => stateName),
-        ).toEqual(['a1', 'a1a', 'a2', 'a2b', 'a2b1', 'a2b1a', 'a2b2'])
+        const crrStates = objectifyRouteString([{ parallel: 'a', regions: {} }])
+        const results = [...updateStateRouteForEntry(destStates, crrStates, stateDefinition)]
 
-        expect(crrStateTree, 'crrStateTree に新しい経路を追加する').toEqual({
-          a: {
-            a1: {
-              a1a: {},
-            },
-            a2: {
-              a2b: {
-                a2b1: {
-                  a2b1a: {},
-                },
-                a2b2: {},
+        expect(results.map(([_, { stateName }]) => stateName)).toEqual([
+          'a1',
+          'a1a',
+          'a2',
+          'a2b',
+          'a2b1',
+          'a2b1a',
+          'a2b2',
+        ])
+        expect(results.map(([_, { isRegionChild }]) => isRegionChild)).toEqual([
+          undefined,
+          true,
+          undefined,
+          true,
+          undefined,
+          true,
+          undefined,
+        ])
+
+        expect(crrStates, 'crrStateTree に新しい経路を追加する').toEqual(
+          objectifyRouteString([
+            {
+              parallel: 'a',
+              regions: {
+                a1: ['a1a'],
+                a2: [
+                  {
+                    parallel: 'a2b',
+                    regions: {
+                      a2b1: ['a2b1a'],
+                      a2b2: [],
+                    },
+                  },
+                ],
               },
             },
-          },
-        })
+          ]),
+        )
       })
 
-      test('3.2: parallel の leaf を指定した場合でも途中の parallel も起動する', async () => {
+      test('3.2: parallel の leaf を指定した場合でも途中の parallel も起動する', () => {
         const destStates = [['a', 'a1', 'a1b']] // これより下に子ステートがある
-        const crrStateTree: RecursiveRecord = { a: { a1: {} } }
-        expect(
-          [...updateStateTreeForEntry(destStates, crrStateTree, stateDefinition)].map(([stateName]) => stateName),
-        ).toEqual(['a1b', 'a2', 'a2b', 'a2b1', 'a2b1a', 'a2b2'])
+        const crrStates = objectifyRouteString([{ parallel: 'a', regions: { a1: [] } }])
+        const results = [...updateStateRouteForEntry(destStates, crrStates, stateDefinition)]
 
-        expect(crrStateTree, 'crrStateTree に新しい経路を追加する').toEqual({
-          a: {
-            a1: {
-              a1b: {},
-            },
-            a2: {
-              a2b: {
-                a2b1: {
-                  a2b1a: {},
-                },
-                a2b2: {},
+        expect(results.map(([_, { stateName }]) => stateName)).toEqual(['a1b', 'a2', 'a2b', 'a2b1', 'a2b1a', 'a2b2'])
+        expect(results.map(([_, { isRegionChild }]) => isRegionChild)).toEqual([
+          true,
+          undefined,
+          true,
+          undefined,
+          true,
+          undefined,
+        ])
+
+        expect(crrStates, 'crrStateTree に新しい経路を追加する').toEqual(
+          objectifyRouteString([
+            {
+              parallel: 'a',
+              regions: {
+                a1: ['a1b'],
+                a2: [
+                  {
+                    parallel: 'a2b',
+                    regions: {
+                      a2b1: ['a2b1a'],
+                      a2b2: [],
+                    },
+                  },
+                ],
               },
             },
-          },
-        })
+          ]),
+        )
       })
 
-      test('3.3: parallel の leaf を指定した場合でも途中の parallel も起動する', async () => {
+      test('3.3: parallel の leaf を指定した場合でも途中の parallel も起動する', () => {
         const destStates = [
           ['a', 'a1', 'a1a'],
           ['a', 'a2', 'a2b'],
         ]
-        const crrStateTree: RecursiveRecord = {
-          a: {
-            a1: {},
-            a2: {},
-          },
-        }
-        expect(
-          [...updateStateTreeForEntry(destStates, crrStateTree, stateDefinition)].map(([stateName]) => stateName),
-        ).toEqual(['a1a', 'a2b', 'a2b1', 'a2b1a', 'a2b2'])
+        const crrStates = objectifyRouteString([{ parallel: 'a', regions: { a1: [], a2: [] } }])
+        const results = [...updateStateRouteForEntry(destStates, crrStates, stateDefinition)]
 
-        expect(crrStateTree, 'crrStateTree に新しい経路を追加する').toEqual({
-          a: {
-            a1: {
-              a1a: {},
-            },
-            a2: {
-              a2b: {
-                a2b1: {
-                  a2b1a: {},
-                },
-                a2b2: {},
+        expect(results.map(([_, { stateName }]) => stateName)).toEqual([
+          'a1a', 'a2b', 'a2b1', 'a2b1a', 'a2b2',
+        ])
+        expect(results.map(([_, { isRegionChild }]) => isRegionChild)).toEqual([true, true, undefined, true, undefined])
+
+        expect(crrStates, 'crrStateTree に新しい経路を追加する').toEqual(
+          objectifyRouteString([
+            {
+              parallel: 'a',
+              regions: {
+                a1: ['a1a'],
+                a2: [
+                  {
+                    parallel: 'a2b',
+                    regions: {
+                      a2b1: ['a2b1a'],
+                      a2b2: [],
+                    },
+                  },
+                ],
               },
             },
-          },
-        })
+          ]),
+        )
       })
     })
   })
 
-  //describe.skip('diggStateNode()', () => {
-  //  beforeAll(async () => {
-  //  })
-  //  test('1: ツリーがないときには空リストを返す', async () => {
-  //    expect(diggStateNode('', {})).toEqual([])
-  //    expect(diggStateNode('xxx', {})).toEqual([])
-  //  })
+  describe.todo('genChildDoneEvents', () => {
 
-  //  test('2: ツリーがあるときには走査した分のパスを返す', async () => {
-  //    expect(diggStateNode('xxx', { aaa: {} })).toEqual(['xxx/aaa'])
-  //    expect(diggStateNode('xxx', {
-  //      aaa: {
-  //        eee: { hhh: {}, iii: { lll: {} } },
-  //        fff: {},
-  //        ggg: { ooo: { qqq: {} } }
-  //      },
-  //      bbb: {}
-  //    })).toEqual([
-  //      'xxx/aaa/eee/hhh',
-  //      'xxx/aaa/eee/iii/lll',
-  //      'xxx/aaa/fff',
-  //      'xxx/aaa/ggg/ooo/qqq',
-  //      'xxx/bbb',
-  //    ])
-  //  })
-  //})
+  })
+
+  describe('x_findDeepestTransitions', () => {
+    const findTransition = ({ events }: TopLvStDefItem<string>, eType: string) => {
+      const transitions = events[eType]
+      if (!transitions) {
+        return undefined
+      }
+      const tIndex = transitions.findIndex(
+        ({ guards }) => !guards.length || (guards as (() => boolean)[]).every((guard) => guard()),
+      )
+      return tIndex != -1 ? { tIndex, transition: transitions[tIndex]! } : undefined
+    }
+
+    const DFL_STATE_ITEM_DEF = {
+      pPath: '',
+      final: false,
+      entryHooks: null,
+      exitHooks: null,
+      invocations: [],
+      internalEvents: {},
+      events: {},
+    }
+    const stateCatalog = new Map<string, NormalizedStateItemBoth>([
+      ['a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+      ['aa', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+    ])
+
+    test('0:空のstateRoute', async () => {
+      const activeParallelSet = new Set<string>()
+      expect(
+        x_findDeepestTransitions(
+          objectifyRouteString([]),
+          0,
+          '',
+          activeParallelSet,
+          stateCatalog,
+          findTransition,
+          'FIRE',
+        ),
+      ).toEqual([[], []])
+      expect([...activeParallelSet]).toEqual([])
+    })
+
+    describe('1: 非parallel な stateRoute', () => {
+      test('0:一致する transition が見つからなければ leaves に末端ステートパスが入る', async () => {
+        const activeParallelSet = new Set<string>()
+        const stateCatalog = new Map<string, NormalizedStateItemBoth>([
+          ['/a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aaa', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+        ])
+        expect(
+          x_findDeepestTransitions(
+            objectifyRouteString(['a', 'aa', 'aaa']),
+            0,
+            '',
+            activeParallelSet,
+            stateCatalog,
+            findTransition,
+            'FIRE',
+          ),
+        ).toEqual([[], ['/a/aa/aaa']])
+        expect([...activeParallelSet]).toEqual([])
+      })
+
+      test('0:末端で発火', async () => {
+        const activeParallelSet = new Set<string>()
+        const stateCatalog = new Map<string, NormalizedStateItemBoth>([
+          ['/a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          [
+            '/a/aa/aaa',
+            {
+              def: {
+                ...DFL_STATE_ITEM_DEF,
+                events: {
+                  FIRE: [
+                    { guards: [() => false], actions: [] },
+                    { guards: [() => true], actions: [] },
+                  ],
+                },
+              },
+              sub: null,
+            },
+          ],
+        ])
+        expect(
+          x_findDeepestTransitions(
+            objectifyRouteString(['a', 'aa', 'aaa']),
+            0,
+            '',
+            activeParallelSet,
+            stateCatalog,
+            findTransition,
+            'FIRE',
+          ),
+        ).toEqual([
+          [
+            {
+              firedIn: '/a/aa/aaa',
+              leaves: ['/a/aa/aaa'],
+              tIndex: 1,
+              transition: {
+                actions: [],
+                guards: [expect.any(Function)],
+              },
+            },
+          ],
+          [],
+        ])
+
+        expect([...activeParallelSet]).toEqual([])
+      })
+
+      test('0:中間親で発火', async () => {
+        const activeParallelSet = new Set<string>()
+        const stateCatalog = new Map<string, NormalizedStateItemBoth>([
+          ['/a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          [
+            '/a/aa',
+            { def: { ...DFL_STATE_ITEM_DEF, events: { FIRE: [{ guards: [() => true], actions: [] }] } }, sub: null },
+          ],
+          ['/a/aa/aaa', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+        ])
+        expect(
+          x_findDeepestTransitions(
+            objectifyRouteString(['a', 'aa', 'aaa']),
+            0,
+            '',
+            activeParallelSet,
+            stateCatalog,
+            findTransition,
+            'FIRE',
+          ),
+        ).toEqual([
+          [
+            {
+              firedIn: '/a/aa',
+              leaves: ['/a/aa/aaa'],
+              tIndex: 0,
+              transition: {
+                actions: [],
+                guards: [expect.any(Function)],
+              },
+            },
+          ],
+          [],
+        ])
+        expect([...activeParallelSet]).toEqual([])
+      })
+
+      test('0:ルートで発火', async () => {
+        const activeParallelSet = new Set<string>()
+        const stateCatalog = new Map<string, NormalizedStateItemBoth>([
+          [
+            '/a',
+            { def: { ...DFL_STATE_ITEM_DEF, events: { FIRE: [{ guards: [() => true], actions: [] }] } }, sub: null },
+          ],
+          ['/a/aa', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aaa', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+        ])
+        expect(
+          x_findDeepestTransitions(
+            objectifyRouteString(['a', 'aa', 'aaa']),
+            0,
+            '',
+            activeParallelSet,
+            stateCatalog,
+            findTransition,
+            'FIRE',
+          ),
+        ).toEqual([
+          [
+            {
+              firedIn: '/a',
+              leaves: ['/a/aa/aaa'],
+              tIndex: 0,
+              transition: {
+                actions: [],
+                guards: [expect.any(Function)],
+              },
+            },
+          ],
+          [],
+        ])
+
+        expect([...activeParallelSet]).toEqual([])
+      })
+    })
+
+    describe('2:parallel', () => {
+      test('1:一致がない場合末端のパスを収集する', async () => {
+        const activeParallelSet = new Set<string>()
+        const stateCatalog = new Map<string, NormalizedStateItemBoth>([
+          ['/a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1/aa1a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2ba', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+        ])
+        const x = { a: ['aa', { aa1: { aa1a: {} }, aa2: { aa2b: { aa2ba: {} } } }] }
+        const y = ['a', { parallel: 'aa', regions: { aa1: ['aa1a'], aa2: ['aa2b', 'aa2ba'] } }]
+        const z = [['a'], { parallel: 'aa', regions: { aa1: [['aa1a']], aa2: [['aa2b'], ['aa2ba']] } }]
+        expect(
+          x_findDeepestTransitions(
+            objectifyRouteString([
+              Object('a'),
+              { parallel: 'aa', regions: { aa1: [Object('aa1a')], aa2: [Object('aa2b'), Object('aa2ba')] } },
+            ]),
+            0,
+            '',
+            activeParallelSet,
+            stateCatalog,
+            findTransition,
+            'FIRE',
+          ),
+        ).toEqual([[], ['/a/aa/aa1/aa1a', '/a/aa/aa2/aa2b/aa2ba']])
+
+        expect([...activeParallelSet]).toEqual(['/a/aa'])
+      })
+
+      test('2.1:末端周辺で発火', async () => {
+        const activeParallelSet = new Set<string>()
+        const stateCatalog = new Map<string, NormalizedStateItemBoth>([
+          ['/a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          [
+            '/a/aa/aa1/aa1a',
+            { def: { ...DFL_STATE_ITEM_DEF, events: { FIRE: [{ guards: [() => true], actions: [] }] } }, sub: null },
+          ],
+          ['/a/aa/aa2', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          [
+            '/a/aa/aa2/aa2b',
+            { def: { ...DFL_STATE_ITEM_DEF, events: { FIRE: [{ guards: [() => true], actions: [] }] } }, sub: null },
+          ],
+          ['/a/aa/aa2/aa2b/aa2ba', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+        ])
+        expect(
+          x_findDeepestTransitions(
+            objectifyRouteString(['a', { parallel: 'aa', regions: { aa1: ['aa1a'], aa2: ['aa2b', 'aa2ba'] } }]),
+            0,
+            '',
+            activeParallelSet,
+            stateCatalog,
+            findTransition,
+            'FIRE',
+          ),
+        ).toEqual([
+          [
+            {
+              firedIn: '/a/aa/aa1/aa1a',
+              leaves: ['/a/aa/aa1/aa1a'],
+              tIndex: 0,
+              transition: {
+                actions: [],
+                guards: [expect.any(Function)],
+              },
+            },
+            {
+              firedIn: '/a/aa/aa2/aa2b',
+              leaves: ['/a/aa/aa2/aa2b/aa2ba'],
+              tIndex: 0,
+              transition: {
+                actions: [],
+                guards: [expect.any(Function)],
+              },
+            },
+          ],
+          [],
+        ])
+
+        expect([...activeParallelSet]).toEqual(['/a/aa'])
+      })
+
+      test('2.2:片方の枝だけで発火', async () => {
+        const activeParallelSet = new Set<string>()
+        const stateCatalog = new Map<string, NormalizedStateItemBoth>([
+          [
+            '/a',
+            { def: { ...DFL_STATE_ITEM_DEF, events: { FIRE: [{ guards: [() => true], actions: [] }] } }, sub: null },
+          ],
+          ['/a/aa', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          [
+            '/a/aa/aa1/aa1a',
+            { def: { ...DFL_STATE_ITEM_DEF, events: { FIRE: [{ guards: [() => true], actions: [] }] } }, sub: null },
+          ],
+          ['/a/aa/aa2', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2ba', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+        ])
+        expect(
+          x_findDeepestTransitions(
+            objectifyRouteString(['a', { parallel: 'aa', regions: { aa1: ['aa1a'], aa2: ['aa2b', 'aa2ba'] } }]),
+            0,
+            '',
+            activeParallelSet,
+            stateCatalog,
+            findTransition,
+            'FIRE',
+          ),
+        ).toEqual([
+          [
+            {
+              firedIn: '/a/aa/aa1/aa1a',
+              leaves: ['/a/aa/aa1/aa1a'],
+              tIndex: 0,
+              transition: {
+                actions: [],
+                guards: [expect.any(Function)],
+              },
+            },
+          ],
+          [],
+        ])
+
+        expect([...activeParallelSet]).toEqual(['/a/aa'])
+      })
+
+      test('2.3:パラレルルートで発火', async () => {
+        const activeParallelSet = new Set<string>()
+        const stateCatalog = new Map<string, NormalizedStateItemBoth>([
+          [
+            '/a',
+            { def: { ...DFL_STATE_ITEM_DEF, events: { FIRE: [{ guards: [() => true], actions: [] }] } }, sub: null },
+          ],
+          [
+            '/a/aa',
+            { def: { ...DFL_STATE_ITEM_DEF, events: { FIRE: [{ guards: [() => true], actions: [] }] } }, sub: null },
+          ],
+          ['/a/aa/aa1', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1/aa1a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2ba', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+        ])
+        expect(
+          x_findDeepestTransitions(
+            objectifyRouteString(['a', { parallel: 'aa', regions: { aa1: ['aa1a'], aa2: ['aa2b', 'aa2ba'] } }]),
+            0,
+            '',
+            activeParallelSet,
+            stateCatalog,
+            findTransition,
+            'FIRE',
+          ),
+        ).toEqual([
+          [
+            {
+              firedIn: '/a/aa',
+              leaves: ['/a/aa/aa1/aa1a', '/a/aa/aa2/aa2b/aa2ba'],
+              tIndex: 0,
+              transition: {
+                actions: [],
+                guards: [expect.any(Function)],
+              },
+            },
+          ],
+          [],
+        ])
+
+        expect([...activeParallelSet]).toEqual(['/a/aa'])
+      })
+
+      test('2.4:ルートで発火', async () => {
+        const activeParallelSet = new Set<string>()
+        const stateCatalog = new Map<string, NormalizedStateItemBoth>([
+          [
+            '/a',
+            { def: { ...DFL_STATE_ITEM_DEF, events: { FIRE: [{ guards: [() => true], actions: [] }] } }, sub: null },
+          ],
+          ['/a/aa', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1/aa1a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2ba', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+        ])
+        expect(
+          x_findDeepestTransitions(
+            objectifyRouteString(['a', { parallel: 'aa', regions: { aa1: ['aa1a'], aa2: ['aa2b', 'aa2ba'] } }]),
+            0,
+            '',
+            activeParallelSet,
+            stateCatalog,
+            findTransition,
+            'FIRE',
+          ),
+        ).toEqual([
+          [
+            {
+              firedIn: '/a',
+              leaves: ['/a/aa/aa1/aa1a', '/a/aa/aa2/aa2b/aa2ba'],
+              tIndex: 0,
+              transition: {
+                actions: [],
+                guards: [expect.any(Function)],
+              },
+            },
+          ],
+          [],
+        ])
+
+        expect([...activeParallelSet]).toEqual(['/a/aa'])
+      })
+
+      test('2.5.1:多重パラレル 浅いところで発火', async () => {
+        const activeParallelSet = new Set<string>()
+        const stateCatalog = new Map<string, NormalizedStateItemBoth>([
+          ['/a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          [
+            '/a/aa',
+            { def: { ...DFL_STATE_ITEM_DEF, events: { FIRE: [{ guards: [() => true], actions: [] }] } }, sub: null },
+          ],
+          ['/a/aa/aa1', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1/aa1a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1/aa1a/aa1a1', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1/aa1a/aa1a1/aa1a1a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1/aa1a/aa1a2', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1/aa1a/aa1a2/aa1a2a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2b1', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2b1/aa2b1a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2b1/aa2b1a/aa2b1aa', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2b2', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2b3', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2b3/aa2b3a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+        ])
+        expect(
+          x_findDeepestTransitions(
+            objectifyRouteString([
+              'a',
+              {
+                parallel: 'aa',
+                regions: {
+                  aa1: [{ parallel: 'aa1a', regions: { aa1a1: ['aa1a1a'], aa1a2: ['aa1a2a'] } }],
+                  aa2: [{ parallel: 'aa2b', regions: { aa2b1: ['aa2b1a', 'aa2b1aa'], aa2b2: [], aa2b3: ['aa2b3a'] } }],
+                },
+              },
+            ]),
+            0,
+            '',
+            activeParallelSet,
+            stateCatalog,
+            findTransition,
+            'FIRE',
+          ),
+        ).toEqual([
+          [
+            {
+              firedIn: '/a/aa',
+              leaves: [
+                '/a/aa/aa1/aa1a/aa1a1/aa1a1a',
+                '/a/aa/aa1/aa1a/aa1a2/aa1a2a',
+                '/a/aa/aa2/aa2b/aa2b1/aa2b1a/aa2b1aa',
+                '/a/aa/aa2/aa2b/aa2b2',
+                '/a/aa/aa2/aa2b/aa2b3/aa2b3a',
+              ],
+              tIndex: 0,
+              transition: {
+                actions: [],
+                guards: [expect.any(Function)],
+              },
+            },
+          ],
+          [],
+        ])
+
+        expect([...activeParallelSet]).toEqual(['/a/aa', '/a/aa/aa1/aa1a', '/a/aa/aa2/aa2b'])
+      })
+
+      test('2.5.2:多重パラレル 深いところで発火', async () => {
+        const activeParallelSet = new Set<string>()
+        const stateCatalog = new Map<string, NormalizedStateItemBoth>([
+          ['/a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          [
+            '/a/aa',
+            { def: { ...DFL_STATE_ITEM_DEF, events: { FIRE: [{ guards: [() => true], actions: [] }] } }, sub: null },
+          ],
+          ['/a/aa/aa1', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1/aa1a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1/aa1a/aa1a1', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          [
+            '/a/aa/aa1/aa1a/aa1a1/aa1a1a',
+            { def: { ...DFL_STATE_ITEM_DEF, events: { FIRE: [{ guards: [() => true], actions: [] }] } }, sub: null },
+          ],
+          ['/a/aa/aa1/aa1a/aa1a2', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1/aa1a/aa1a2/aa1a2a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          [
+            '/a/aa/aa2',
+            { def: { ...DFL_STATE_ITEM_DEF, events: { FIRE: [{ guards: [() => true], actions: [] }] } }, sub: null },
+          ],
+          ['/a/aa/aa2/aa2b', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2b1', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2b1/aa2b1a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2b1/aa2b1a/aa2b1aa', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2b2', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2b3', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2b3/aa2b3a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+        ])
+        expect(
+          x_findDeepestTransitions(
+            objectifyRouteString([
+              'a',
+              {
+                parallel: 'aa',
+                regions: {
+                  aa1: [{ parallel: 'aa1a', regions: { aa1a1: ['aa1a1a'], aa1a2: ['aa1a2a'] } }],
+                  aa2: [{ parallel: 'aa2b', regions: { aa2b1: ['aa2b1a', 'aa2b1aa'], aa2b2: [], aa2b3: ['aa2b3a'] } }],
+                },
+              },
+            ]),
+            0,
+            '',
+            activeParallelSet,
+            stateCatalog,
+            findTransition,
+            'FIRE',
+          ),
+        ).toEqual([
+          [
+            {
+              firedIn: '/a/aa/aa1/aa1a/aa1a1/aa1a1a',
+              leaves: ['/a/aa/aa1/aa1a/aa1a1/aa1a1a'],
+              tIndex: 0,
+              transition: {
+                actions: [],
+                guards: [expect.any(Function)],
+              },
+            },
+            {
+              firedIn: '/a/aa/aa2',
+              leaves: ['/a/aa/aa2/aa2b/aa2b1/aa2b1a/aa2b1aa', '/a/aa/aa2/aa2b/aa2b2', '/a/aa/aa2/aa2b/aa2b3/aa2b3a'],
+              tIndex: 0,
+              transition: {
+                actions: [],
+                guards: [expect.any(Function)],
+              },
+            },
+          ],
+          [],
+        ])
+
+        expect([...activeParallelSet]).toEqual(['/a/aa', '/a/aa/aa1/aa1a', '/a/aa/aa2/aa2b'])
+      })
+
+      test('2.5.3:多重パラレル 発火なし', async () => {
+        const activeParallelSet = new Set<string>()
+        const stateCatalog = new Map<string, NormalizedStateItemBoth>([
+          ['/a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1/aa1a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1/aa1a/aa1a1', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1/aa1a/aa1a1/aa1a1a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1/aa1a/aa1a2', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1/aa1a/aa1a2/aa1a2a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2b1', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2b1/aa2b1a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2b1/aa2b1a/aa2b1aa', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2b2', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2b3', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2b3/aa2b3a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+        ])
+        const result = x_findDeepestTransitions(
+          objectifyRouteString([
+            'a',
+            {
+              parallel: 'aa',
+              regions: {
+                aa1: [{ parallel: 'aa1a', regions: { aa1a1: ['aa1a1a'], aa1a2: ['aa1a2a'] } }],
+                aa2: [{ parallel: 'aa2b', regions: { aa2b1: ['aa2b1a', 'aa2b1aa'], aa2b2: [], aa2b3: ['aa2b3a'] } }],
+              },
+            },
+          ]),
+          0,
+          '',
+          activeParallelSet,
+          stateCatalog,
+          findTransition,
+          'FIRE',
+        )
+        expect(result).toEqual([
+          [],
+          [
+            '/a/aa/aa1/aa1a/aa1a1/aa1a1a',
+            '/a/aa/aa1/aa1a/aa1a2/aa1a2a',
+            '/a/aa/aa2/aa2b/aa2b1/aa2b1a/aa2b1aa',
+            '/a/aa/aa2/aa2b/aa2b2',
+            '/a/aa/aa2/aa2b/aa2b3/aa2b3a',
+          ],
+        ])
+
+        expect([...activeParallelSet]).toEqual(['/a/aa', '/a/aa/aa1/aa1a', '/a/aa/aa2/aa2b'])
+      })
+
+      test('2.5.0:多重パラレル', async () => {
+        const activeParallelSet = new Set<string>()
+        const stateCatalog = new Map<string, NormalizedStateItemBoth>([
+          ['/a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1/aa1a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1/aa1a/aa1a1', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1/aa1a/aa1a1/aa1a1a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa1/aa1a/aa1a2', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          [
+            '/a/aa/aa1/aa1a/aa1a2/aa1a2a',
+            { def: { ...DFL_STATE_ITEM_DEF, events: { FIRE: [{ guards: [() => true], actions: [] }] } }, sub: null },
+          ],
+          [
+            '/a/aa/aa2',
+            { def: { ...DFL_STATE_ITEM_DEF, events: { FIRE: [{ guards: [() => true], actions: [] }] } }, sub: null },
+          ],
+          ['/a/aa/aa2/aa2b', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2b1', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          [
+            '/a/aa/aa2/aa2b/aa2b1/aa2b1a',
+            { def: { ...DFL_STATE_ITEM_DEF, events: { FIRE: [{ guards: [() => true], actions: [] }] } }, sub: null },
+          ],
+          ['/a/aa/aa2/aa2b/aa2b1/aa2b1a/aa2b1aa', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2b2', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2b3', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+          ['/a/aa/aa2/aa2b/aa2b3/aa2b3a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
+        ])
+        expect(
+          x_findDeepestTransitions(
+            objectifyRouteString([
+              'a',
+              {
+                parallel: 'aa',
+                regions: {
+                  aa1: [{ parallel: 'aa1a', regions: { aa1a1: ['aa1a1a'], aa1a2: ['aa1a2a'] } }],
+                  aa2: [{ parallel: 'aa2b', regions: { aa2b1: ['aa2b1a', 'aa2b1aa'], aa2b2: [], aa2b3: ['aa2b3a'] } }],
+                },
+              },
+            ]),
+            0,
+            '',
+            activeParallelSet,
+            stateCatalog,
+            findTransition,
+            'FIRE',
+          ),
+        ).toEqual([
+          [
+            {
+              firedIn: '/a/aa/aa1/aa1a/aa1a2/aa1a2a',
+              leaves: ['/a/aa/aa1/aa1a/aa1a2/aa1a2a'],
+              tIndex: 0,
+              transition: {
+                actions: [],
+                guards: [expect.any(Function)],
+              },
+            },
+            {
+              firedIn: '/a/aa/aa2/aa2b/aa2b1/aa2b1a',
+              leaves: ['/a/aa/aa2/aa2b/aa2b1/aa2b1a/aa2b1aa'],
+              tIndex: 0,
+              transition: {
+                actions: [],
+                guards: [expect.any(Function)],
+              },
+            },
+          ],
+          [],
+        ])
+
+        expect([...activeParallelSet]).toEqual(['/a/aa', '/a/aa/aa1/aa1a', '/a/aa/aa2/aa2b'])
+      })
+    })
+  })
 
   describe('deriveEventTransition()', () => {
     beforeAll(async () => { })
@@ -501,7 +1304,7 @@ describe('runtime_step.core', () => {
           'foo',
           undefined,
           runtimeUtils.makeFnBaseParam({}, { type: 'foo' }, undefined),
-          { A: { AA: { AAA: {} } } },
+          objectifyRouteString(['A', 'AA', 'AAA']),
           {}, // machineGuards
           // stateCatalog
           new Map<string, NormalizedStateItemBoth>([
@@ -548,12 +1351,11 @@ describe('runtime_step.core', () => {
               },
             ],
           ]),
-          [], // regionPaths,
           GLOBAL_DEF_ITEM,
         ),
       ).toEqual([
         {
-          from: '/A/AA/AAA',
+          lca: '/A/AA',
           tIndex: 1,
           transition: {
             to: 'AAC',
@@ -566,7 +1368,6 @@ describe('runtime_step.core', () => {
     })
 
     test('2: subStates (非parallel) では leaves は遷移元の候補を表す', async () => {
-      const regionPaths = ['/a/a1', '/a/a2']
       const fooEventOf = {
         '/a': [{ to: '/a/a1/a1b', fullTo: '/a/a1/a1b', guards: [], actions: [] }], // こっちが発火する
         '/a/a1/a1a/a1aa': [{ to: '/b', fullTo: '/b', guards: [() => false], actions: [] }], // guards が false なので発火しない
@@ -576,7 +1377,7 @@ describe('runtime_step.core', () => {
           'foo',
           undefined,
           runtimeUtils.makeFnBaseParam({}, { type: 'foo' }, undefined),
-          { a: { a1: { a1a: { a1aa: {} } }, a2: { a2a: {} } } },
+          objectifyRouteString([{ parallel: 'a', regions: { a1: ['a1a', 'a1aa'], a2: ['a2a'] } }]),
           {}, // machineGuards
           // stateCatalog
           new Map<string, NormalizedStateItemBoth>([
@@ -642,12 +1443,11 @@ describe('runtime_step.core', () => {
               },
             ],
           ]),
-          regionPaths,
           GLOBAL_DEF_ITEM,
         ),
       ).toEqual([
         {
-          from: '/a/a1/a1a/a1aa',
+          lca: '/a/a1',
           tIndex: 0,
           transition: {
             actions: [],
@@ -660,18 +1460,22 @@ describe('runtime_step.core', () => {
     })
 
     test('3.1: region を抜けない遷移', async () => {
-      const regionPaths = ['/a/a2/a21', '/a/a2/a22', '/a/a1', '/a/a2']
       const fooEventOf = {
         '/a/a1/a1a': [{ to: 'a1b', fullTo: '/a/a1/a1b', guards: [], actions: [] }],
         // NOTE: この遷移が正当かどうかはともかくとして、leaves に '/a/a2/a21/a21a' が含まれてしまうので遷移実行には leaves を検証し exit されるものを調整する必要がある
-        '/a/a2': [{ to: '/a/a2/a22/a22c', fullTo: '/a/a2/a22/a22c', guards: [], actions: [] }],
+        '/a/a2': [{ to: '/a/a2/a2a/a2a2/a2a2c', fullTo: '/a/a2/a2a/a2a2/a2a2c', guards: [], actions: [] }],
       }
       expect(
         deriveEventTransition(
           'foo',
           undefined,
           runtimeUtils.makeFnBaseParam({}, { type: 'foo' }, undefined),
-          { a: { a1: { a1a: {} }, a2: { a21: { a21a: {} }, a22: { a22a: {} } } } },
+          objectifyRouteString([
+            {
+              parallel: 'a',
+              regions: { a1: ['a1a'], a2: [{ parallel: 'a2a', regions: { a2a1: ['a2a1a'], a2a2: ['a2a2a'] } }] },
+            },
+          ]),
           {}, // machineGuards
           // stateCatalog
           new Map<string, NormalizedStateItemBoth>([
@@ -714,7 +1518,7 @@ describe('runtime_step.core', () => {
               },
             ],
             [
-              '/a/a2/a21',
+              '/a/a2/a2a',
               {
                 def: {
                   ...DFL_NST_ITEM_DEF,
@@ -724,42 +1528,51 @@ describe('runtime_step.core', () => {
               },
             ],
             [
-              '/a/a2/a21/a21a',
+              '/a/a2/a2a/a2a1',
               {
                 def: {
                   ...DFL_NST_ITEM_DEF,
-                  pPath: '/a/a2/a21',
+                  pPath: '/a/a2/a2a',
                 },
                 sub: null,
               },
             ],
             [
-              '/a/a2/a22',
+              '/a/a2/a2a/a2a1/a2a1a',
               {
                 def: {
                   ...DFL_NST_ITEM_DEF,
-                  pPath: '/a/a2',
+                  pPath: '/a/a2/a2a/a2a1',
                 },
                 sub: null,
               },
             ],
             [
-              '/a/a2/a22/a22a',
+              '/a/a2/a2a/a2a2',
               {
                 def: {
                   ...DFL_NST_ITEM_DEF,
-                  pPath: '/a/a2/a22',
+                  pPath: '/a/a2/a2a',
+                },
+                sub: null,
+              },
+            ],
+            [
+              '/a/a2/a2a/a2a2/a2a2a',
+              {
+                def: {
+                  ...DFL_NST_ITEM_DEF,
+                  pPath: '/a/a2/a2a/a2a2',
                 },
                 sub: null,
               },
             ],
           ]),
-          regionPaths,
           GLOBAL_DEF_ITEM,
         ),
       ).toEqual([
         {
-          from: '/a/a1/a1a',
+          lca: '/a/a1',
           tIndex: 0,
           transition: {
             to: 'a1b',
@@ -769,11 +1582,11 @@ describe('runtime_step.core', () => {
           },
         },
         {
-          from: '/a/a2/a22/a22a',
+          lca: '/a/a2/a2a/a2a2',
           tIndex: 0,
           transition: {
-            to: '/a/a2/a22/a22c',
-            fullTo: '/a/a2/a22/a22c',
+            to: '/a/a2/a2a/a2a2/a2a2c',
+            fullTo: '/a/a2/a2a/a2a2/a2a2c',
             actions: [],
             guards: [],
           },
@@ -782,7 +1595,6 @@ describe('runtime_step.core', () => {
     })
 
     test('3.2: region を抜ける遷移', async () => {
-      const regionPaths = ['/a/a2/a21', '/a/a2/a22', '/a/a1', '/a/a2']
       const fooEventOf = {
         '/a/a1/a1a': [{ to: 'a1b', fullTo: '/a/a1/a1b', guards: [], actions: [] }], // これは候補に挙がるが棄却される
         '/a/a2': [{ to: '/b/ba', fullTo: '/b/ba', guards: [], actions: [] }],
@@ -792,7 +1604,15 @@ describe('runtime_step.core', () => {
           'foo',
           undefined,
           runtimeUtils.makeFnBaseParam({}, { type: 'foo' }, undefined),
-          { a: { a1: { a1a: {} }, a2: { a21: { a21a: {} }, a22: { a22a: {} } } } },
+          objectifyRouteString([
+            {
+              parallel: 'a',
+              regions: {
+                a1: ['a1a'],
+                a2: [{ parallel: 'a2a', regions: { a2a1: ['a2a1a'], a2a2: ['a2a2a'] } }],
+              },
+            },
+          ]),
           {}, // machineGuards
           // stateCatalog
           new Map<string, NormalizedStateItemBoth>([
@@ -835,7 +1655,7 @@ describe('runtime_step.core', () => {
               },
             ],
             [
-              '/a/a2/a21',
+              '/a/a2/a2a',
               {
                 def: {
                   ...DFL_NST_ITEM_DEF,
@@ -845,17 +1665,27 @@ describe('runtime_step.core', () => {
               },
             ],
             [
-              '/a/a2/a21/a21a',
+              '/a/a2/a2a/a2a1',
               {
                 def: {
                   ...DFL_NST_ITEM_DEF,
-                  pPath: '/a/a2/a21',
+                  pPath: '/a/a2/a2a',
                 },
                 sub: null,
               },
             ],
             [
-              '/a/a2/a22',
+              '/a/a2/a2a/a2a1/a2a1a',
+              {
+                def: {
+                  ...DFL_NST_ITEM_DEF,
+                  pPath: '/a/a2/a2a/a2a1',
+                },
+                sub: null,
+              },
+            ],
+            [
+              '/a/a2/a2a',
               {
                 def: {
                   ...DFL_NST_ITEM_DEF,
@@ -865,22 +1695,31 @@ describe('runtime_step.core', () => {
               },
             ],
             [
-              '/a/a2/a22/a22a',
+              '/a/a2/a2a/a2a2',
               {
                 def: {
                   ...DFL_NST_ITEM_DEF,
-                  pPath: '/a/a2/a22',
+                  pPath: '/a/a2/a2a',
+                },
+                sub: null,
+              },
+            ],
+            [
+              '/a/a2/a2a/a2a2/a2a2a',
+              {
+                def: {
+                  ...DFL_NST_ITEM_DEF,
+                  pPath: '/a/a2/a2a/a2a2',
                 },
                 sub: null,
               },
             ],
           ]),
-          regionPaths,
           GLOBAL_DEF_ITEM,
         ),
       ).toEqual([
         {
-          from: '/a', // parallel root が遷移元になる
+          lca: '', // parallel root が遷移元になる
           tIndex: 0,
           transition: {
             to: '/b/ba',
@@ -894,12 +1733,11 @@ describe('runtime_step.core', () => {
 
     describe('4: サブステートのいずれかがイベントにマッチしたとき、親ステートのイベントは発火しない', () => {
       test('4.1: 親に遷移先が指定されていても無視される', async () => {
-        const regionPaths = ['/a/a1/a11', '/a/a1/a12', '/a/a1']
         const fooEventOf = {
           '/a/a1': [{ to: '/b/ba', fullTo: '/b/ba', guards: [], actions: [] }],
-          '/a/a1/a11/a11a': [
+          '/a/a1/a1a/a1a1/a1a1a': [
             { guards: [() => false], actions: [] },
-            { to: 'a11b', fullTo: '/a/a1/a11/a11b', guards: [], actions: [] },
+            { to: 'a1a1b', fullTo: '/a/a1/a1a/a1a1/a1a1b', guards: [], actions: [] },
           ],
         }
         expect(
@@ -907,7 +1745,21 @@ describe('runtime_step.core', () => {
             'foo',
             undefined,
             runtimeUtils.makeFnBaseParam({}, { type: 'foo' }, undefined),
-            { a: { a1: { a11: { a11a: {}, a11b: {} } } } },
+            objectifyRouteString([
+              {
+                parallel: 'a',
+                regions: {
+                  a1: [
+                    {
+                      parallel: 'a1a',
+                      regions: {
+                        a1a1: ['a1a1a'],
+                      },
+                    },
+                  ],
+                },
+              },
+            ]),
             {}, // machineGuards
             // stateCatalog
             new Map<string, NormalizedStateItemBoth>([
@@ -924,7 +1776,7 @@ describe('runtime_step.core', () => {
                 },
               ],
               [
-                '/a/a1/a11',
+                '/a/a1/a1a',
                 {
                   def: {
                     ...DFL_NST_ITEM_DEF,
@@ -934,37 +1786,46 @@ describe('runtime_step.core', () => {
                 },
               ],
               [
-                '/a/a1/a11/a11a',
+                '/a/a1/a1a/a1a1',
                 {
                   def: {
                     ...DFL_NST_ITEM_DEF,
-                    pPath: '/a/a1/a11',
-                    events: { foo: fooEventOf['/a/a1/a11/a11a'] },
+                    pPath: '/a/a1/a1a',
                   },
                   sub: null,
                 },
               ],
               [
-                '/a/a1/a11/a11b',
+                '/a/a1/a1a/a1a1/a1a1a',
                 {
                   def: {
                     ...DFL_NST_ITEM_DEF,
-                    pPath: '/a/a1/a11',
+                    pPath: '/a/a1/a1a/a1a1',
+                    events: { foo: fooEventOf['/a/a1/a1a/a1a1/a1a1a'] },
+                  },
+                  sub: null,
+                },
+              ],
+              [
+                '/a/a1/a1a/a1a1/a1a1b',
+                {
+                  def: {
+                    ...DFL_NST_ITEM_DEF,
+                    pPath: '/a/a1/a1a/a1a1',
                   },
                   sub: null,
                 },
               ],
             ]),
-            regionPaths,
             GLOBAL_DEF_ITEM,
           ),
         ).toEqual([
           {
-            from: '/a/a1/a11/a11a',
+            lca: '/a/a1/a1a/a1a1',
             tIndex: 1,
             transition: {
-              to: 'a11b',
-              fullTo: '/a/a1/a11/a11b',
+              to: 'a1a1b',
+              fullTo: '/a/a1/a1a/a1a1/a1a1b',
               actions: [],
               guards: [],
             },
@@ -972,18 +1833,32 @@ describe('runtime_step.core', () => {
         ])
       })
 
-      test('4.2: 子に遷移先が無指定でも親は発火しない。遷移先無指定のため from は undefined になる', async () => {
-        const regionPaths = ['/a/a1/a11', '/a/a1/a12', '/a/a1']
+      test('4.2: 子に遷移先が無指定でも親は発火しない。遷移先無指定のため lca は undefined になる', async () => {
         const fooEventOf = {
           '/a/a1': [{ to: '/b/ba', fullTo: '/b/ba', guards: [], actions: [] }],
-          '/a/a1/a11/a11a': [{ guards: [], actions: [] }],
+          '/a/a1/a1a/a1a1/a1a1a': [{ guards: [], actions: [] }],
         }
         expect(
           deriveEventTransition(
             'foo',
             undefined,
             runtimeUtils.makeFnBaseParam({}, { type: 'foo' }, undefined),
-            { a: { a1: { a11: { a11a: {}, a11b: {} } } } },
+            objectifyRouteString([
+              {
+                parallel: 'a',
+                regions: {
+                  a1: [
+                    {
+                      parallel: 'a1a',
+                      regions: {
+                        a1a1: ['a1a1a'],
+                        a1a2: [],
+                      },
+                    },
+                  ],
+                },
+              },
+            ]),
             {}, // machineGuards
             // stateCatalog
             new Map<string, NormalizedStateItemBoth>([
@@ -1000,7 +1875,7 @@ describe('runtime_step.core', () => {
                 },
               ],
               [
-                '/a/a1/a11',
+                '/a/a1/a1a',
                 {
                   def: {
                     ...DFL_NST_ITEM_DEF,
@@ -1010,33 +1885,42 @@ describe('runtime_step.core', () => {
                 },
               ],
               [
-                '/a/a1/a11/a11a',
+                '/a/a1/a1a/a1a1',
                 {
                   def: {
                     ...DFL_NST_ITEM_DEF,
-                    pPath: '/a/a1/a11',
-                    events: { foo: fooEventOf['/a/a1/a11/a11a'] },
+                    pPath: '/a/a1/a1a',
                   },
                   sub: null,
                 },
               ],
               [
-                '/a/a1/a11/a11b',
+                '/a/a1/a1a/a1a1/a1a1a',
                 {
                   def: {
                     ...DFL_NST_ITEM_DEF,
                     pPath: '/a/a1/a11',
+                    events: { foo: fooEventOf['/a/a1/a1a/a1a1/a1a1a'] },
+                  },
+                  sub: null,
+                },
+              ],
+              [
+                '/a/a1/a1a/a1a2',
+                {
+                  def: {
+                    ...DFL_NST_ITEM_DEF,
+                    pPath: '/a/a1/a1a',
                   },
                   sub: null,
                 },
               ],
             ]),
-            regionPaths,
             GLOBAL_DEF_ITEM,
           ),
         ).toEqual([
           {
-            from: undefined,
+            lca: undefined,
             tIndex: 0,
             transition: {
               actions: [],
@@ -1046,18 +1930,24 @@ describe('runtime_step.core', () => {
         ])
       })
 
-      test('4.3: 子と親に遷移先が無指定でも親は発火しない。遷移先無指定のため from は undefined になる', async () => {
-        const regionPaths = ['/a/a1/a11', '/a/a1/a12', '/a/a1']
+      test('4.3: 子と親に遷移先が無指定でも親は発火しない。遷移先無指定のため lca は undefined になる', async () => {
         const fooEventOf = {
           '/a/a1': [{ guards: [], actions: [] }],
-          '/a/a1/a11/a11a': [{ guards: [], actions: [] }],
+          '/a/a1/a1a/a1a1/a1a1a': [{ guards: [], actions: [] }],
         }
         expect(
           deriveEventTransition(
             'foo',
             undefined,
             runtimeUtils.makeFnBaseParam({}, { type: 'foo' }, undefined),
-            { a: { a1: { a11: { a11a: {}, a11b: {} } } } },
+            objectifyRouteString([
+              {
+                parallel: 'a',
+                regions: {
+                  a1: [{ parallel: 'a1a', regions: { a1a1: ['a1a1a'], a1a2: [] } }],
+                },
+              },
+            ]),
             {}, // machineGuards
             // stateCatalog
             new Map<string, NormalizedStateItemBoth>([
@@ -1074,7 +1964,7 @@ describe('runtime_step.core', () => {
                 },
               ],
               [
-                '/a/a1/a11',
+                '/a/a1/a1a',
                 {
                   def: {
                     ...DFL_NST_ITEM_DEF,
@@ -1084,33 +1974,42 @@ describe('runtime_step.core', () => {
                 },
               ],
               [
-                '/a/a1/a11/a11a',
+                '/a/a1/a1a/a1a1',
                 {
                   def: {
                     ...DFL_NST_ITEM_DEF,
-                    pPath: '/a/a1/a11',
-                    events: { foo: fooEventOf['/a/a1/a11/a11a'] },
+                    pPath: '/a/a1/a1a',
                   },
                   sub: null,
                 },
               ],
               [
-                '/a/a1/a11/a11b',
+                '/a/a1/a1a/a1a1/a1a1a',
                 {
                   def: {
                     ...DFL_NST_ITEM_DEF,
-                    pPath: '/a/a1/a11',
+                    pPath: '/a/a1/a1a/a1a1',
+                    events: { foo: fooEventOf['/a/a1/a1a/a1a1/a1a1a'] },
+                  },
+                  sub: null,
+                },
+              ],
+              [
+                '/a/a1/a1a/a1a2',
+                {
+                  def: {
+                    ...DFL_NST_ITEM_DEF,
+                    pPath: '/a/a1/a1a',
                   },
                   sub: null,
                 },
               ],
             ]),
-            regionPaths,
             GLOBAL_DEF_ITEM,
           ),
         ).toEqual([
           {
-            from: undefined,
+            lca: undefined,
             tIndex: 0,
             transition: {
               actions: [],
@@ -1172,7 +2071,7 @@ describe('runtime_step.core', () => {
           },
         ],
         [
-          '/a/a2/a21',
+          '/a/a2/a2a',
           {
             def: {
               ...DFL_NST_ITEM_DEF,
@@ -1182,31 +2081,41 @@ describe('runtime_step.core', () => {
           },
         ],
         [
-          '/a/a2/a21/a21a',
+          '/a/a2/a2a/a2a1',
           {
             def: {
               ...DFL_NST_ITEM_DEF,
-              pPath: '/a/a2/a21',
+              pPath: '/a/a2/a2a',
             },
             sub: null,
           },
         ],
         [
-          '/a/a2/a22',
+          '/a/a2/a2a/a2a1/a2a1a',
           {
             def: {
               ...DFL_NST_ITEM_DEF,
-              pPath: '/a/a2',
+              pPath: '/a/a2/a2a/a2a1',
             },
             sub: null,
           },
         ],
         [
-          '/a/a2/a22/a22a',
+          '/a/a2/a2a/a2a2',
           {
             def: {
               ...DFL_NST_ITEM_DEF,
-              pPath: '/a/a2/a22',
+              pPath: '/a/a2/a2a',
+            },
+            sub: null,
+          },
+        ],
+        [
+          '/a/a2/a2a/a2a2/a2a2a',
+          {
+            def: {
+              ...DFL_NST_ITEM_DEF,
+              pPath: '/a/a2/a2a/a2a2',
             },
             sub: null,
           },
@@ -1214,22 +2123,35 @@ describe('runtime_step.core', () => {
       ])
 
       test('5.1: childDone', async () => {
-        const regionPaths = ['/a/a2/a21', '/a/a2/a22', '/a/a1', '/a/a2']
-
         expect(
           deriveEventTransition(
             ':childDone:',
             { path: '/a' },
             runtimeUtils.makeFnBaseParam({}, { type: ':childDone:' }, undefined),
-            { a: { a1: { a1a: {} }, a2: { a21: { a21a: {} }, a22: { a22a: {} } } } },
+            objectifyRouteString([
+              {
+                parallel: 'a',
+                regions: {
+                  a1: ['a1a'],
+                  a2: [
+                    {
+                      parallel: 'a2a',
+                      regions: {
+                        a2a1: ['a2a1a'],
+                        a2a2: ['a2a2a'],
+                      },
+                    },
+                  ],
+                },
+              },
+            ]),
             {}, // machineGuards
             stateCatalog,
-            regionPaths,
             GLOBAL_DEF_ITEM,
           ),
         ).toEqual([
           {
-            from: '/a',
+            lca: '',
             tIndex: 0,
             transition: {
               to: '/b',
@@ -1242,23 +2164,27 @@ describe('runtime_step.core', () => {
       })
 
       test('5.2: childDone', async () => {
-        const regionPaths = ['/a/a2/a21', '/a/a2/a22', '/a/a1', '/a/a2']
-
         expect(
           deriveEventTransition(
             ':childDone:',
             { path: '/a/a2' },
             runtimeUtils.makeFnBaseParam({}, { type: ':childDone:' }, undefined),
-            //{ a: { a1: { a1a: {} }, a2: { a21: { a21a: {} }, a22: { a22a: {} } } } },
-            { a: { a1: { a1a: {} }, a2: { a21: { a21a: {} } } } },
+            objectifyRouteString([
+              {
+                parallel: 'a',
+                regions: {
+                  a1: ['a1a'],
+                  a2: [{ parallel: 'a2a', regions: { a2a1: ['a2a1a'], a2a2: ['a2a2a'] } }],
+                },
+              },
+            ]),
             {}, // machineGuards
             stateCatalog,
-            regionPaths,
             GLOBAL_DEF_ITEM,
           ),
         ).toEqual([
           {
-            from: '/a',
+            lca: '',
             tIndex: 0,
             transition: {
               to: '/c',
@@ -1278,7 +2204,15 @@ describe('runtime_step.core', () => {
             'foo',
             undefined,
             runtimeUtils.makeFnBaseParam({}, { type: 'foo' }, undefined),
-            { a: { a1: { a1a: {} }, a2: { a2a: { a2a1: { a2a1a: {} }, a2a2: { a2a2a: {} } } } } },
+            objectifyRouteString([
+              {
+                parallel: 'a',
+                regions: {
+                  a1: ['a1a'],
+                  a2: [{ parallel: 'a2a', regions: { a2a1: ['a2a1a'], a2a2: ['a2a2a'] } }],
+                },
+              },
+            ]),
             {}, // machineGuards
 
             new Map<string, NormalizedStateItemBoth>([
@@ -1370,8 +2304,6 @@ describe('runtime_step.core', () => {
               ],
             ]),
 
-            [],
-
             {
               events: { foo: [{ to: 'b', fullTo: '/b', guards: [], actions: [] }] },
               internalEvents: {},
@@ -1379,7 +2311,7 @@ describe('runtime_step.core', () => {
           ),
         ).toEqual([
           {
-            from: '/a',
+            lca: '',
             tIndex: 0,
             transition: {
               to: 'b',
@@ -1392,15 +2324,21 @@ describe('runtime_step.core', () => {
       })
     })
 
-    test.skip('0.0: 実験用', async () => {
-      const regionPaths = ['/a/a2/a2a/a2a1', '/a/a2/a2a/a2a2', '/a/a1', '/a/a2']
-
+    test('0.0: 実験用', async () => {
       expect(
         deriveEventTransition(
           'foo',
           undefined,
           runtimeUtils.makeFnBaseParam({}, { type: 'foo' }, undefined),
-          { a: { a1: { a1a: {} }, a2: { a2a: { a2a1: { a2a1a: {} }, a2a2: { a2a2a: {} } } } } },
+          objectifyRouteString([
+            {
+              parallel: 'a',
+              regions: {
+                a1: ['a1a'],
+                a2: [{ parallel: 'a2a', regions: { a2a1: ['a2a1a'], a2a2: ['a2a2a'] } }],
+              },
+            },
+          ]),
           {}, // machineGuards
 
           new Map<string, NormalizedStateItemBoth>([
@@ -1439,7 +2377,6 @@ describe('runtime_step.core', () => {
                 def: {
                   ...DFL_NST_ITEM_DEF,
                   pPath: '/a',
-                  //events: { foo: [{ to: '/a/a2/a21b', fullTo: '/a/a2/a21b', guards: [], actions: [] }], }
                 },
                 sub: null,
               },
@@ -1497,88 +2434,20 @@ describe('runtime_step.core', () => {
             ],
           ]),
 
-          regionPaths,
           GLOBAL_DEF_ITEM,
         ),
       ).toEqual([
         {
-          from: '',
+          lca: '/a/a2',
           tIndex: 0,
           transition: {
-            to: '',
-            fullTo: '',
+            to: 'a2b',
+            fullTo: '/a/a2/a2b',
             actions: [],
             guards: [],
           },
         },
       ])
-    })
-  })
-
-  describe('o_readyToFindAlwaysTransition', () => {
-    test('0:この関数の処理想定範囲外', async () => {
-      expect(
-        o_readyToGetParallelPathIfExited(['/a/a1', '/a/a2'])('/a/a1/a1a', '/a'),
-        '自身のパラレルルートを 第二引数 fullTo に指定されることは想定していない',
-      ).toBe('/a')
-    })
-
-    test('1:parallel を抜けないときは空文字を返す', async () => {
-      expect(o_readyToGetParallelPathIfExited(['/a/a1', '/a/a2'])('/a/a1/a1a', '/a/a1/a1b')).toBe('')
-    })
-
-    test('2:第二引数fullTo が regionPath から始まっていないなら脱出と見なす', async () => {
-      expect(
-        o_readyToGetParallelPathIfExited(['/a/a1', '/a/a2'])('/a', '/b'),
-        '対象パスがregion以下でないときは空文字を返す',
-      ).toBe('')
-      expect(o_readyToGetParallelPathIfExited(['/a/a1', '/a/a2'])('/a/a1', '/b')).toBe('/a')
-      expect(o_readyToGetParallelPathIfExited(['/a/a1', '/a/a2'])('/a/a1/a1a', '/b')).toBe('/a')
-    })
-
-    test('3:サブステートからの移動', async () => {
-      // 完全脱出
-      expect(
-        o_readyToGetParallelPathIfExited(['/a/a1/a1a/a1a1', '/a/a1/a1a/a1a2', '/a/a1', '/a/a2'])(
-          '/a/a1/a1a/a1a1/a1a1b',
-          '/b',
-        ),
-      ).toBe('/a')
-
-      // 兄弟移動
-      expect(
-        o_readyToGetParallelPathIfExited(['/a/a1/a1a/a1a1', '/a/a1/a1a/a1a2', '/a/a1', '/a/a2'])(
-          '/a/a1/a1a/a1a1/a1a1b',
-          '/a/a1/a1a/a1a1/a1a1c',
-        ),
-      ).toBe('')
-      // 親（リージョン）への移動
-      expect(
-        o_readyToGetParallelPathIfExited(['/a/a1/a1a/a1a1', '/a/a1/a1a/a1a2', '/a/a1', '/a/a2'])(
-          '/a/a1/a1a/a1a1/a1a1b',
-          '/a/a1/a1a/a1a1',
-        ),
-      ).toBe('')
-
-      // 根は同じままパラレルルート以上への移動
-      expect(
-        o_readyToGetParallelPathIfExited(['/a/a1/a1a/a1a1', '/a/a1/a1a/a1a2', '/a/a1', '/a/a2'])(
-          '/a/a1/a1a/a1a1/a1a1b',
-          '/a/a1/a1a',
-        ),
-      ).toBe('/a/a1/a1a')
-      expect(
-        o_readyToGetParallelPathIfExited(['/a/a1/a1a/a1a1', '/a/a1/a1a/a1a2', '/a/a1', '/a/a2'])(
-          '/a/a1/a1a/a1a1/a1a1b',
-          '/a/a1',
-        ),
-      ).toBe('/a/a1/a1a')
-      expect(
-        o_readyToGetParallelPathIfExited(['/a/a1/a1a/a1a1', '/a/a1/a1a/a1a2', '/a/a1', '/a/a2'])(
-          '/a/a1/a1a/a1a1/a1a1b',
-          '/a',
-        ),
-      ).toBe('/a')
     })
   })
 
@@ -1599,11 +2468,11 @@ describe('runtime_step.core', () => {
                 transition: { to: '/a/a2/a2c', fullTo: '/a/a2/a2c', actions: [], guards: [] },
               },
             ],
-            ['/a/a1', '/a/a2'],
+            ['/a'],
           ),
         ).toEqual([
           {
-            from: '/a/a2/a2b/a2ba',
+            lca: '/a/a2',
             tIndex: 0,
             transition: { to: '/a/a2/a2c', fullTo: '/a/a2/a2c', actions: [], guards: [] },
           },
@@ -1621,9 +2490,9 @@ describe('runtime_step.core', () => {
                 transition: { to: '/b', fullTo: '/b', actions: [], guards: [] },
               },
             ],
-            ['/a/aa/aa1', '/a/aa/aa2'],
+            ['/a/aa'],
           ),
-        ).toEqual([{ from: '/a/aa', tIndex: 0, transition: { to: '/b', fullTo: '/b', actions: [], guards: [] } }])
+        ).toEqual([{ lca: '', tIndex: 0, transition: { to: '/b', fullTo: '/b', actions: [], guards: [] } }])
       })
     })
 
@@ -1638,11 +2507,9 @@ describe('runtime_step.core', () => {
               transition: { to: '/a/a1/a', fullTo: '/a/a1/a', actions: [], guards: [] },
             },
           ],
-          ['/a/a1', '/a/a2', '/a/a3', '/a/a4'],
+          ['/a'],
         ),
-      ).toEqual([
-        { from: '/b/ba', tIndex: 0, transition: { to: '/a/a1/a', fullTo: '/a/a1/a', actions: [], guards: [] } },
-      ])
+      ).toEqual([{ lca: '', tIndex: 0, transition: { to: '/a/a1/a', fullTo: '/a/a1/a', actions: [], guards: [] } }])
     })
 
     test('2.2: 別 parallel から parallel への遷移', async () => {
@@ -1656,9 +2523,9 @@ describe('runtime_step.core', () => {
               transition: { to: '/a/a1/a', fullTo: '/a/a1/a', actions: [], guards: [] },
             },
           ],
-          ['/a/a1', '/a/a2', '/a/a3', '/a/a4', '/b/b1', '/b/b2'],
+          ['/a', '/b'],
         ),
-      ).toEqual([{ from: '/b', tIndex: 0, transition: { to: '/a/a1/a', fullTo: '/a/a1/a', actions: [], guards: [] } }])
+      ).toEqual([{ lca: '', tIndex: 0, transition: { to: '/a/a1/a', fullTo: '/a/a1/a', actions: [], guards: [] } }])
     })
 
     test('3: 同じ parallel から抜ける遷移が複数あるとき、先に定義されているほうを採用する。to がない処理はそのまま残す', async () => {
@@ -1685,11 +2552,11 @@ describe('runtime_step.core', () => {
               transition: { to: '/d', fullTo: '/d', actions: [], guards: [] },
             },
           ],
-          ['/a/a1', '/a/a2', '/a/a3', '/a/a4'],
+          ['/a'],
         ),
       ).toEqual([
-        { from: undefined, tIndex: 0, transition: { actions: [], guards: [] } },
-        { from: '/a', tIndex: 0, transition: { to: '/b', fullTo: '/b', actions: [], guards: [] } },
+        { lca: undefined, tIndex: 0, transition: { actions: [], guards: [] } },
+        { lca: '', tIndex: 0, transition: { to: '/b', fullTo: '/b', actions: [], guards: [] } },
       ])
     })
 
@@ -1722,21 +2589,21 @@ describe('runtime_step.core', () => {
               transition: { to: '/a/a3/a3e', fullTo: '/a/a3/a3e', actions: [], guards: [] },
             },
           ],
-          ['/a/a2/a2a/a2a1', '/a/a2/a2a/a2a2', '/a/a1', '/a/a2', '/a/a3'],
+          ['/a/a2/a2a', '/a'],
         ),
       ).toEqual([
-        { from: '/a/a1/a1c', tIndex: 0, transition: { to: '/a/a1/a1b', fullTo: '/a/a1/a1b', actions: [], guards: [] } },
+        { lca: '/a/a1', tIndex: 0, transition: { to: '/a/a1/a1b', fullTo: '/a/a1/a1b', actions: [], guards: [] } },
         {
-          from: '/a/a2/a2a/a2a1/a2a1a',
+          lca: '/a/a2/a2a/a2a1',
           tIndex: 0,
           transition: { to: '/a/a2/a2a/a2a1/a2a1b', fullTo: '/a/a2/a2a/a2a1/a2a1b', actions: [], guards: [] },
         },
         {
-          from: '/a/a2/a2a/a2a2/a2a2b',
+          lca: '/a/a2/a2a/a2a2',
           tIndex: 0,
           transition: { to: '/a/a2/a2a/a2a2/a2a2c', fullTo: '/a/a2/a2a/a2a2/a2a2c', actions: [], guards: [] },
         },
-        { from: '/a/a3/a3b', tIndex: 0, transition: { to: '/a/a3/a3e', fullTo: '/a/a3/a3e', actions: [], guards: [] } },
+        { lca: '/a/a3', tIndex: 0, transition: { to: '/a/a3/a3e', fullTo: '/a/a3/a3e', actions: [], guards: [] } },
       ])
     })
 
@@ -1769,12 +2636,12 @@ describe('runtime_step.core', () => {
               transition: { to: '/a/a3/a3e', fullTo: '/a/a3/a3e', actions: [], guards: [] },
             },
           ],
-          ['/a/a2/a2a/a2a1', '/a/a2/a2a/a2a2', '/a/a1', '/a/a2', '/a/a3'],
+          ['/a/a2/a2a', '/a'],
         ),
       ).toEqual([
-        { from: '/a/a1/a1c', tIndex: 0, transition: { to: '/a/a1/a1b', fullTo: '/a/a1/a1b', actions: [], guards: [] } },
-        { from: '/a/a3/a3b', tIndex: 0, transition: { to: '/a/a3/a3e', fullTo: '/a/a3/a3e', actions: [], guards: [] } },
-        { from: '/a/a2/a2a', tIndex: 0, transition: { to: '/a/a2/a2b', fullTo: '/a/a2/a2b', actions: [], guards: [] } },
+        { lca: '/a/a2', tIndex: 0, transition: { to: '/a/a2/a2b', fullTo: '/a/a2/a2b', actions: [], guards: [] } },
+        { lca: '/a/a1', tIndex: 0, transition: { to: '/a/a1/a1b', fullTo: '/a/a1/a1b', actions: [], guards: [] } },
+        { lca: '/a/a3', tIndex: 0, transition: { to: '/a/a3/a3e', fullTo: '/a/a3/a3e', actions: [], guards: [] } },
       ])
     })
 
@@ -1809,88 +2676,99 @@ describe('runtime_step.core', () => {
             },
             { firedIn: '/a/a5/a5a', leaves: ['/a/a5/a5a'], tIndex: 0, transition: { actions: [], guards: [] } },
           ],
-          ['/a/a2/a2a/a2a1', '/a/a2/a2a/a2a2', '/a/a1', '/a/a2', '/a/a3', '/a/a4', '/a/a5'],
+          ['/a/a2/a2a', '/a'],
         ),
       ).toEqual([
-        { from: undefined, tIndex: 0, transition: { actions: [], guards: [] } },
-        { from: undefined, tIndex: 0, transition: { actions: [], guards: [] } },
-        { from: '/a', tIndex: 0, transition: { to: '/b', fullTo: '/b', actions: [], guards: [] } },
+        { tIndex: 0, transition: { actions: [], guards: [] } },
+        { tIndex: 0, transition: { actions: [], guards: [] } },
+        { lca: '', tIndex: 0, transition: { to: '/b', fullTo: '/b', actions: [], guards: [] } },
       ])
     })
-  })
 
-  describe('oo_adjustSrcPathForParallel', () => {
-    const REGION_PATHS = [
-      '/a/aa/aa2/aa2a/aa2aa/aa2aa1',
-      '/a/aa/aa2/aa2a/aa2aa/aa2aa2',
-      '/a/aa/aa1/aa1a/aa1a1',
-      '/a/aa/aa1/aa1a/aa1a2',
-      '/a/aa/aa1',
-      '/a/aa/aa2',
-      '/a/ab/ab1',
-      '/a/ab/ab2',
-    ]
+    describe('深いレベルの競合', () => {
+      test('0: 内輪同士の遷移は生存', async () => {
+        expect(
+          x_removeConflictedTransitions(
+            [
+              {
+                firedIn: '',
+                leaves: ['/a/aa/aa1/aa1a/aa1a1/aa1a1a'],
+                tIndex: 0,
+                transition: { to: '', fullTo: '/a/aa/aa1/aa1a/aa1a1/aa1a1b', actions: [], guards: [] },
+              },
+              {
+                firedIn: '',
+                leaves: ['/a/aa/aa1/aa1a/aa1a2/aa1a2a'],
+                tIndex: 0,
+                transition: { to: '', fullTo: '/a/aa/aa1/aa1a/aa1a2/aa1a2b', actions: [], guards: [] },
+              },
+            ],
+            ['/a/aa/aa1/aa1a', '/a/aa/aa2/aa2a', '/a/ab/abb', '/a/aa'],
+          ),
+        ).toEqual([
+          {
+            lca: '/a/aa/aa1/aa1a/aa1a1',
+            tIndex: 0,
+            transition: { to: '', fullTo: '/a/aa/aa1/aa1a/aa1a1/aa1a1b', actions: [], guards: [] },
+          },
+          {
+            lca: '/a/aa/aa1/aa1a/aa1a2',
+            tIndex: 0,
+            transition: { to: '', fullTo: '/a/aa/aa1/aa1a/aa1a2/aa1a2b', actions: [], guards: [] },
+          },
+        ])
+      })
 
-    test('1: 第一引数srcPathが regionPaths から始まらないならそのまま第一引数を返す', async () => {
-      expect(oo_adjustSrcPathForParallel('/a/ac', '/a/aa', REGION_PATHS)).toBe('/a/ac')
-    })
+      test('0: ', async () => {
+        expect(
+          x_removeConflictedTransitions(
+            [
+              {
+                firedIn: '',
+                leaves: ['/a/aa/aa1/aa1a/aa1a1/aa1a1a'],
+                tIndex: 0,
+                transition: { to: '', fullTo: '/a/aa/aa1/aa1a/aa1a1/aa1a1b', actions: [], guards: [] },
+              },
+              {
+                firedIn: '',
+                leaves: ['/a/aa/aa1/aa1a/aa1a2/aa1a2a'],
+                tIndex: 0,
+                transition: { to: '', fullTo: '/a/aa/aa1/aa1b', actions: [], guards: [] },
+              },
+            ],
+            ['/a/aa/aa1/aa1a', '/a/aa/aa2/aa2a', '/a/ab/abb', '/a/aa'],
+          ),
+        ).toEqual([
+          { lca: '/a/aa/aa1', tIndex: 0, transition: { to: '', fullTo: '/a/aa/aa1/aa1b', actions: [], guards: [] } },
+        ])
+      })
 
-    describe('srcPath が region 内。srcPathをそのまま返すパターン', () => {
-      test('1: from と to が兄弟であり region の孫', async () => {
-        const src = '/a/aa/aa1/aa1a/aa1a1/aa1a1a/aa1a1aa'
-        const dst = '/a/aa/aa1/aa1a/aa1a1/aa1a1a/aa1a1ab'
-        expect(deriveCommonPathPrefix([src, dst]), 'commonPrefix').toBe('/a/aa/aa1/aa1a/aa1a1/aa1a1a')
-        // commonPrefix が 最深regionPaths よりも長い -> src に渡したパスそのまま返す
-        expect(oo_adjustSrcPathForParallel(src, dst, REGION_PATHS)).toBe('/a/aa/aa1/aa1a/aa1a1/aa1a1a/aa1a1aa')
-      })
-      test('2: region 以下の孫同士の遷移', async () => {
-        const src = '/a/aa/aa1/aa1a/aa1a1/aa1a1a/aa1a1aa'
-        const dst = '/a/aa/aa1/aa1a/aa1a1/aa1a1b/aa1a1ba'
-        expect(deriveCommonPathPrefix([src, dst])).toBe('/a/aa/aa1/aa1a/aa1a1') // region
-        // commonPrefix が 最深regionPath と同一 -> src パスをそのまま返す
-        expect(oo_adjustSrcPathForParallel(src, dst, REGION_PATHS)).toBe('/a/aa/aa1/aa1a/aa1a1/aa1a1a/aa1a1aa')
-      })
-      test('3: from と to が兄弟であり同じ region の子', async () => {
-        const src = '/a/aa/aa1/aa1a/aa1a1/aa1a1a'
-        const dst = '/a/aa/aa1/aa1a/aa1a1/aa1a1b'
-        expect(deriveCommonPathPrefix([src, dst])).toBe('/a/aa/aa1/aa1a/aa1a1') // region
-        // commonPrefix が 最深regionPath と同一 -> src パスをそのまま返す
-        expect(oo_adjustSrcPathForParallel(src, dst, REGION_PATHS)).toBe('/a/aa/aa1/aa1a/aa1a1/aa1a1a')
-      })
-    })
-
-    describe('srcPath が region 内。parallel を求めて返すパターン', () => {
-      test('4: region の子から一段上の region の兄弟へ', async () => {
-        // 共通パス '/a/aa/aa1'
-        // 抜けないparallel '/a/aa'
-        // 抜けるparallel   '/a/aa/aa1/aa1a'
-        const src = '/a/aa/aa1/aa1a/aa1a2/aa1a2b'
-        const dst = '/a/aa/aa1/aa1b'
-        expect(deriveCommonPathPrefix([src, dst])).toBe('/a/aa/aa1') // region
-        expect(oo_adjustSrcPathForParallel(src, dst, REGION_PATHS)).toBe('/a/aa/aa1/aa1a')
-      })
-      test('5: 上段の region の孫 parallel の region から parallel の一つ親から見た兄弟へ', async () => {
-        // 抜けないparallel '/a/aa'
-        // 抜けるparallel   '/a/aa/aa2/aa2a'
-        expect(oo_adjustSrcPathForParallel('/a/aa/aa2/aa2a/aa2aa/aa2aa1/aa2aa1a', '/a/aa/aa2/aa2b', REGION_PATHS)).toBe(
-          '/a/aa/aa2/aa2a/aa2aa',
-        )
-      })
-      test('6.1: 2つのparallel を抜ける 1', async () => {
-        // 抜けるparallel   '/a/aa'
-        expect(oo_adjustSrcPathForParallel('/a/aa/aa1/aa1a/aa1a1/aa1a1a', '/a/ab', REGION_PATHS)).toBe('/a/aa')
-      })
-      test('6.2: 2つのparallel を抜ける 2', async () => {
-        // 抜けるparallel   '/a/aa'
-        expect(oo_adjustSrcPathForParallel('/a/aa/aa1/aa1a/aa1a1/aa1a1a', '/b', REGION_PATHS)).toBe('/a/aa')
-      })
-      test('7.1: リージョンからparallel を2つ抜ける', async () => {
-        // 抜けるparallel   '/a/aa'
-        expect(oo_adjustSrcPathForParallel('/a/aa/aa1/aa1a/aa1a1', '/b', REGION_PATHS)).toBe('/a/aa')
-      })
-      test('7.2: パラレルから親パラレルを抜ける', async () => {
-        // 抜けるparallel   '/a/aa'
-        expect(oo_adjustSrcPathForParallel('/a/aa/aa1/aa1a', '/b', REGION_PATHS)).toBe('/a/aa')
+      test('0: ', async () => {
+        expect(
+          x_removeConflictedTransitions(
+            [
+              {
+                firedIn: '',
+                leaves: ['/a/aa/aa1/aa1a/aa1a1/aa1a1a'],
+                tIndex: 0,
+                transition: { to: '', fullTo: '/a/aa/aa1/aa1a/aa1a1/aa1a1b', actions: [], guards: [] },
+              },
+              {
+                firedIn: '',
+                leaves: ['/a/aa/aa1/aa1a/aa1a2/aa1a2a'],
+                tIndex: 0,
+                transition: { to: '', fullTo: '/a/aa/aa1/aa1b', actions: [], guards: [] },
+              },
+              {
+                firedIn: '',
+                leaves: ['/a/aa/aa2/aa2b'],
+                tIndex: 0,
+                transition: { to: '', fullTo: '/a/ab', actions: [], guards: [] },
+              },
+            ],
+            ['/a/aa/aa1/aa1a', '/a/aa/aa2/aa2a', '/a/ab/abb', '/a/aa'],
+          ),
+        ).toEqual([{ lca: '/a', tIndex: 0, transition: { to: '', fullTo: '/a/ab', actions: [], guards: [] } }])
       })
     })
   })

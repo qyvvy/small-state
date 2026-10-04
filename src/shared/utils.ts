@@ -22,17 +22,6 @@ export function assertOrThrow<T>(validCondition: T, msg: string): validCondition
 }
 
 
-function getCircularReplacer() {
-  const seen = new WeakSet()
-  return (key: string, value: any) => {
-    if (typeof value === "object" && value !== null) {
-      if (seen.has(value)) return
-      seen.add(value)
-    }
-    return value
-  }
-}
-
 export function stringifyCircular(target: any) {
   const seen = new WeakSet()
   return JSON.stringify(target, (_, value: any) => {
@@ -108,27 +97,9 @@ export function parentPathOf(statePath: string) {
   return statePath.slice(0, statePath.lastIndexOf(ST_DELIM))
 }
 export function splitStPath(statePath: string) {
+  if (statePath === '') return []
   if (statePath[0] !== '/') {
     throw new Error(`path must start with '/': "${statePath}"`)
   }
   return statePath.slice(1).split(ST_DELIM)
-}
-// paths は '/' から始まる文字列
-export function deriveCommonPathPrefix(paths: string[]) {
-  if (paths.length < 2) return paths?.[0] || ''
-  const model = paths[0]!
-  const rest = paths.slice(1)
-  let bgn = 1
-  let end = model.indexOf(ST_DELIM, bgn) + 1
-  loop: while (end) {
-    const needle = model.slice(bgn, end)
-    for (const pth of rest) {
-      if (!pth.startsWith(needle, bgn)) {
-        break loop
-      }
-    }
-    bgn = end
-    end = model.indexOf(ST_DELIM, bgn) + 1
-  }
-  return model.slice(0, bgn - 1)
 }

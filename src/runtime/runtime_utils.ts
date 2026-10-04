@@ -11,6 +11,7 @@ import type {
 } from '../machine/m.types'
 import type { AnyFn, RecursiveRecord } from '../shared/general.types'
 import { isPlainObject } from '../shared/utils'
+import type { StateRoute } from './r.types'
 
 //import type { EnqueueActions, CheckFn, EnqueueFn } from '../machine/createMachine-enqueue'
 
@@ -108,16 +109,40 @@ export function readyToEvalGuard<C extends MContext, Ex extends EventBody, I>(
   }
 }
 
-// 第一引数に指定した道順に沿って、第二引数を辿る関数
-export function traverseStateTreeMatch(stateSplitted: string[], crrStateTree: RecursiveRecord) {
-  let focusedNode = crrStateTree
-  let i: number = -2,
-    sName: string
-  for ([i, sName] of stateSplitted.entries()) {
-    if (!(sName in focusedNode)) {
-      return { endIdx: i, remaining: focusedNode, isExhausted: false }
+
+// 第二引数に指定した道順に沿って、第一引数を辿る関数
+export function traverseStateRouteMatch(
+  stateRoute: StateRoute, stPathSplitted: string[]
+): { isExhausted: boolean, endIdx: number, remaining?: [StateRoute, startIdx: number, asRootpath?: boolean] } {
+  let focusedRoute = stateRoute
+  let routeIdx = 0
+  const len = stPathSplitted.length
+  let i: number
+  for (i = 0; i < len; i++, routeIdx++) {
+    const sName = stPathSplitted[i]
+    const routeEl = focusedRoute[routeIdx]
+    if (!routeEl) {
+      return { isExhausted: false, endIdx: i, remaining: [focusedRoute, routeIdx] }
+    } else if (!('parallel' in routeEl)) {
+      if (sName !== routeEl.valueOf()) {
+        return { isExhausted: false, endIdx: i, remaining: [focusedRoute, routeIdx] }
+      }
+      continue
     }
-    focusedNode = focusedNode[sName]!
+    const { parallel, regions } = routeEl
+    if (sName !== parallel) {
+      return { isExhausted: false, endIdx: i }
+    }
+    i += 1
+    if (i >= len) {
+      return { isExhausted: true, endIdx: i, remaining: [focusedRoute, routeIdx, true] }
+    }
+    const regionRoute = regions[stPathSplitted[i]!]
+    if (!regionRoute) {
+      return { isExhausted: false, endIdx: i }
+    }
+    focusedRoute = regionRoute
+    routeIdx = -1
   }
-  return { endIdx: i + 1, remaining: focusedNode, isExhausted: true }
+  return { isExhausted: true, endIdx: i, remaining: [focusedRoute, routeIdx] }
 }

@@ -15,7 +15,7 @@ const DFL_NORM_ST_DEF_DEF = {
 }
 const DFL_GLOBAL_DEF_ITEM = {
   events: {},
-  internalEvents: {}
+  internalEvents: {},
 }
 
 describe('machine', () => {
@@ -25,7 +25,7 @@ describe('machine', () => {
     beforeAll(async () => { })
 
     test('0: シンプルで一般的なマシン定義', async () => {
-      const { definition, globalDefItem, stateCatalog, regionPaths } = getDefinitionAndCatalog(
+      const { definition, topLvDefItem, stateCatalog, regionPaths } = getDefinitionAndCatalog(
         {
           name: 'auth',
           initialState: 'idle',
@@ -53,13 +53,13 @@ describe('machine', () => {
       )
 
       expect(regionPaths).toEqual([])
-      expect(globalDefItem).toEqual(DFL_GLOBAL_DEF_ITEM)
+      expect(topLvDefItem).toEqual(DFL_GLOBAL_DEF_ITEM)
 
       expect([...stateCatalog.keys()]).toEqual(['/idle', '/authenticating', '/authenticated', '/error'])
 
       expect(definition).toEqual({
         initial: 'idle',
-        states: {
+        stateOf: {
           idle: {
             def: {
               ...DFL_NORM_ST_DEF_DEF,
@@ -136,7 +136,7 @@ describe('machine', () => {
             initContext: () => ({ count: 1 }),
           },
           // @ts-expect-error
-          () => (null),
+          () => null,
         ),
       ).toThrow(/Invalid state definition:/)
     })
@@ -162,7 +162,7 @@ describe('machine', () => {
           state1: [on('event1', { to: 'state2' }), on('event2', { to: 'state3', guard: ['bar', 'baz'] })],
           state2: [],
           state3: null,
-          state4: [{ isFinal: true }],
+          state4: [{ final: true }],
         }),
       )
 
@@ -172,7 +172,7 @@ describe('machine', () => {
 
       expect(definition).toEqual({
         initial: 'state1',
-        states: {
+        stateOf: {
           state1: {
             def: {
               ...DFL_NORM_ST_DEF_DEF,
@@ -183,10 +183,7 @@ describe('machine', () => {
                   {
                     to: 'state3',
                     fullTo: '/state3',
-                    guards: [
-                      'bar',
-                      'baz',
-                    ],
+                    guards: ['bar', 'baz'],
                     actions: [],
                   },
                 ],
@@ -229,7 +226,7 @@ describe('machine', () => {
 
       expect(definition).toEqual({
         initial: 'state2',
-        states: {
+        stateOf: {
           state1: {
             def: { ...DFL_NORM_ST_DEF_DEF, pPath: '', final: true },
             sub: null,
@@ -270,9 +267,7 @@ describe('machine', () => {
             initContext: () => ({ count: 1 }),
           },
           ({ on }) => ({
-            state1: [
-              on('event1', [])
-            ]
+            state1: [on('event1', [])],
           }),
         ),
       ).toThrow(/Empty config/)
@@ -287,16 +282,17 @@ describe('machine', () => {
         ({ on }) => ({
           state1: [
             on('event1', { to: 'state2' }),
-            on('event2', [{ to: 'state2', guard: 'foo' }, { to: 'state3', guard: ['bar', 'baz'], actions: 'qux' }]),
+            on('event2', [
+              { to: 'state2', guard: 'foo' },
+              { to: 'state3', guard: ['bar', 'baz'], actions: 'qux' },
+            ]),
           ],
           state2: [
-            on(
-              'event2', [
+            on('event2', [
               { to: 'state1', guard: 'foo' },
               { actions: 'qux', guard: ['bar', 'baz'] },
               { actions: 'quux', to: 'state3' },
-            ]
-            ),
+            ]),
           ],
           state3: null,
         }),
@@ -306,7 +302,7 @@ describe('machine', () => {
 
       expect([...stateCatalog.keys()]).toEqual(['/state1', '/state2', '/state3'])
 
-      expect(definition.states).toEqual({
+      expect(definition.stateOf).toEqual({
         state1: {
           def: {
             ...DFL_NORM_ST_DEF_DEF,
@@ -316,8 +312,9 @@ describe('machine', () => {
               event2: [
                 { to: 'state2', fullTo: '/state2', guards: ['foo'], actions: [] },
                 {
-                  to: 'state3', fullTo: '/state3',
-                  guards: ['bar', 'baz',],
+                  to: 'state3',
+                  fullTo: '/state3',
+                  guards: ['bar', 'baz'],
                   actions: ['qux'],
                 },
               ],
@@ -333,10 +330,7 @@ describe('machine', () => {
               event2: [
                 { to: 'state1', fullTo: '/state1', guards: ['foo'], actions: [] },
                 {
-                  guards: [
-                    'bar',
-                    'baz',
-                  ],
+                  guards: ['bar', 'baz'],
                   actions: ['qux'],
                 },
                 { to: 'state3', fullTo: '/state3', guards: [], actions: ['quux'] },
@@ -360,12 +354,12 @@ describe('machine', () => {
           actions: {
             increment: ({ update, c }) => update({ count: c.count + 1 }),
             greet: (_, params: { name: string }) => {
-              console.log(`Hello, ${params.name}!`);
+              console.log(`Hello, ${params.name}!`)
             },
           },
           guards: {
-            isTrue: () => true
-          }
+            isTrue: () => true,
+          },
         },
         ({ on, entryHook, exitHook }) => ({
           state1: [
@@ -376,12 +370,12 @@ describe('machine', () => {
             }),
             exitHook(() => console.log('exit state1')),
             on(':always:', { actions: () => console.log('ctx changed') }),
-            on('event1', { to: 'state2', actions: ('increment') }),
+            on('event1', { to: 'state2', actions: 'increment' }),
           ],
           state2: [
             entryHook('increment', { greet: { name: 'Ken' } }),
             {
-              isFinal: true,
+              final: true,
             },
           ],
         }),
@@ -391,7 +385,7 @@ describe('machine', () => {
 
       expect([...stateCatalog.keys()]).toEqual(['/state1', '/state2'])
 
-      expect(definition.states).toEqual({
+      expect(definition.stateOf).toEqual({
         state1: {
           def: {
             ...DFL_NORM_ST_DEF_DEF,
@@ -514,7 +508,7 @@ describe('machine', () => {
           state1: [
             entryHook(() => console.log('enter state1')),
             exitHook(() => console.log('exit state1')),
-            on('event1', { to: 'state2', guard: ((c) => false) }),
+            on('event1', { to: 'state2', guard: (c) => false }),
             on(':childDone:', { to: 'state2' }),
             subStates({
               subState1: [
@@ -545,7 +539,7 @@ describe('machine', () => {
 
       expect(definition).toEqual({
         initial: 'state1',
-        states: {
+        stateOf: {
           state1: {
             def: {
               ...DFL_NORM_ST_DEF_DEF,
@@ -555,7 +549,7 @@ describe('machine', () => {
               internalEvents: {
                 ':childDone:': {
                   cond: expect.any(Function),
-                  transitions: [{ to: 'state2', fullTo: '/state2', actions: [], guards: [] }]
+                  transitions: [{ to: 'state2', fullTo: '/state2', actions: [], guards: [] }],
                 },
               },
               events: {
@@ -564,7 +558,7 @@ describe('machine', () => {
             },
             sub: {
               initial: 'subState1',
-              states: {
+              stateOf: {
                 subState1: {
                   def: {
                     ...DFL_NORM_ST_DEF_DEF,
@@ -581,13 +575,15 @@ describe('machine', () => {
                   },
                   sub: {
                     initial: 'subSubState1',
-                    states: {
+                    stateOf: {
                       subSubState1: {
                         def: {
                           ...DFL_NORM_ST_DEF_DEF,
                           pPath: '/state1/subState1',
                           events: {
-                            event3: [{ to: 'subSubState2', fullTo: '/state1/subState1/subSubState2', guards: [], actions: [] }],
+                            event3: [
+                              { to: 'subSubState2', fullTo: '/state1/subState1/subSubState2', guards: [], actions: [] },
+                            ],
                           },
                         },
                         sub: null,
@@ -610,7 +606,7 @@ describe('machine', () => {
             def: { ...DFL_NORM_ST_DEF_DEF, pPath: '' },
             sub: {
               initial: undefined,
-              states: {},
+              stateOf: {},
             },
           },
         },
@@ -637,21 +633,27 @@ describe('machine', () => {
             state1: [
               entryHook(() => console.log('enter state1')),
               exitHook(() => console.log('exit state1')),
-              on('event1', { to: 'state2', guard: ((c) => false) }),
+              on('event1', { to: 'state2', guard: (c) => false }),
               on(':childDone:', { to: 'state2' }),
-              subStates({
-                subState0: null,
-                subState1: [
-                  on('subEvent1', { to: 'subState2' }),
-                  on(':childDone:', { to: 'subState2' }),
-                  subStates({
-                    subSubState0: null,
-                    subSubState1: [on('event3', { to: 'subSubState2' })],
-                    subSubState2: null,
-                  }, 'subSubState2'),
-                ],
-                subState2: null,
-              }, 'subState1'),
+              subStates(
+                {
+                  subState0: null,
+                  subState1: [
+                    on('subEvent1', { to: 'subState2' }),
+                    on(':childDone:', { to: 'subState2' }),
+                    subStates(
+                      {
+                        subSubState0: null,
+                        subSubState1: [on('event3', { to: 'subSubState2' })],
+                        subSubState2: null,
+                      },
+                      'subSubState2',
+                    ),
+                  ],
+                  subState2: null,
+                },
+                'subState1',
+              ),
             ],
             state2: null,
           },
@@ -674,7 +676,7 @@ describe('machine', () => {
 
       expect(definition).toEqual({
         initial: 'state1',
-        states: {
+        stateOf: {
           state0: {
             def: { ...DFL_NORM_ST_DEF_DEF, pPath: '', final: true },
             sub: null,
@@ -697,7 +699,7 @@ describe('machine', () => {
             },
             sub: {
               initial: 'subState1',
-              states: {
+              stateOf: {
                 subState0: {
                   def: { ...DFL_NORM_ST_DEF_DEF, pPath: '/state1', final: true },
                   sub: null,
@@ -709,7 +711,7 @@ describe('machine', () => {
                     internalEvents: {
                       ':childDone:': {
                         cond: expect.any(Function),
-                        transitions: [{ to: 'subState2', fullTo: '/state1/subState2', actions: [], guards: [] }]
+                        transitions: [{ to: 'subState2', fullTo: '/state1/subState2', actions: [], guards: [] }],
                       },
                     },
                     events: {
@@ -718,7 +720,7 @@ describe('machine', () => {
                   },
                   sub: {
                     initial: 'subSubState2',
-                    states: {
+                    stateOf: {
                       subSubState0: {
                         def: { ...DFL_NORM_ST_DEF_DEF, pPath: '/state1/subState1', final: true },
                         sub: null,
@@ -728,7 +730,9 @@ describe('machine', () => {
                           ...DFL_NORM_ST_DEF_DEF,
                           pPath: '/state1/subState1',
                           events: {
-                            event3: [{ to: 'subSubState2', fullTo: '/state1/subState1/subSubState2', guards: [], actions: [] }],
+                            event3: [
+                              { to: 'subSubState2', fullTo: '/state1/subState1/subSubState2', guards: [], actions: [] },
+                            ],
                           },
                         },
                         sub: null,
@@ -756,7 +760,7 @@ describe('machine', () => {
     })
 
     test('6.4: subStates with Global events', async () => {
-      const { definition, globalDefItem, stateCatalog, regionPaths } = getDefinitionAndCatalog(
+      const { definition, topLvDefItem, stateCatalog, regionPaths } = getDefinitionAndCatalog(
         {
           types: {
             events: {} as
@@ -770,12 +774,12 @@ describe('machine', () => {
         },
         ({ on, subStates }) => [
           [
-            on(':always:', { actions: (() => console.log('ctx changed')) }),
-            on('event3', { actions: (() => console.log('event3 received')) }),
+            on(':always:', { actions: () => console.log('ctx changed') }),
+            on('event3', { actions: () => console.log('event3 received') }),
           ],
           {
             state1: [
-              on('event1', { to: 'state2', guard: ((c) => false) }),
+              on('event1', { to: 'state2', guard: (c) => false }),
               on(':childDone:', { to: 'state2' }),
               subStates({
                 subState1: [
@@ -796,7 +800,7 @@ describe('machine', () => {
 
       expect(regionPaths).toEqual([])
 
-      expect(globalDefItem).toEqual({
+      expect(topLvDefItem).toEqual({
         internalEvents: {
           ':always:': { transitions: [{ actions: [expect.any(Function)], guards: [] }] },
         },
@@ -816,7 +820,7 @@ describe('machine', () => {
 
       expect(definition).toEqual({
         initial: 'state1',
-        states: {
+        stateOf: {
           state1: {
             def: {
               ...DFL_NORM_ST_DEF_DEF,
@@ -824,7 +828,7 @@ describe('machine', () => {
               internalEvents: {
                 ':childDone:': {
                   cond: expect.any(Function),
-                  transitions: [{ to: 'state2', fullTo: '/state2', actions: [], guards: [] }]
+                  transitions: [{ to: 'state2', fullTo: '/state2', actions: [], guards: [] }],
                 },
               },
               events: {
@@ -833,7 +837,7 @@ describe('machine', () => {
             },
             sub: {
               initial: 'subState1',
-              states: {
+              stateOf: {
                 subState1: {
                   def: {
                     ...DFL_NORM_ST_DEF_DEF,
@@ -841,7 +845,7 @@ describe('machine', () => {
                     internalEvents: {
                       ':childDone:': {
                         cond: expect.any(Function),
-                        transitions: [{ to: 'subState2', fullTo: '/state1/subState2', actions: [], guards: [] }]
+                        transitions: [{ to: 'subState2', fullTo: '/state1/subState2', actions: [], guards: [] }],
                       },
                     },
                     events: {
@@ -850,13 +854,15 @@ describe('machine', () => {
                   },
                   sub: {
                     initial: 'subSubState1',
-                    states: {
+                    stateOf: {
                       subSubState1: {
                         def: {
                           ...DFL_NORM_ST_DEF_DEF,
                           pPath: '/state1/subState1',
                           events: {
-                            event3: [{ to: 'subSubState2', fullTo: '/state1/subState1/subSubState2', guards: [], actions: [] }],
+                            event3: [
+                              { to: 'subSubState2', fullTo: '/state1/subState1/subSubState2', guards: [], actions: [] },
+                            ],
                           },
                         },
                         sub: null,
@@ -879,7 +885,7 @@ describe('machine', () => {
             def: { ...DFL_NORM_ST_DEF_DEF, pPath: '' },
             sub: {
               initial: undefined,
-              states: {},
+              stateOf: {},
             },
           },
         },
@@ -905,7 +911,8 @@ describe('machine', () => {
             entryHook(() => console.log('enter state1')),
             exitHook(() => console.log('exit state1')),
             on('event1', {
-              to: 'state3', guard: ((c) => false)
+              to: 'state3',
+              guard: (c) => false,
             }),
             on(':childDone:', { to: 'state3' }),
             parallel({
@@ -919,7 +926,7 @@ describe('machine', () => {
                 [
                   on('event3', { to: 'subState2' }),
                   on(':childDone:', {
-                    actions: (() => console.log('region2 is done'))
+                    actions: () => console.log('region2 is done'),
                   }),
                 ],
                 {
@@ -936,10 +943,10 @@ describe('machine', () => {
       )
 
       expect(regionPaths).toEqual([
-        "/state2/region1",
-        "/state2/region2",
-        "/state2/region3",
-        "/state2/region4",
+        '/state2/region1',
+        '/state2/region2',
+        '/state2/region3',
+        '/state2/region4',
       ])
 
       expect([...stateCatalog.keys()]).toEqual([
@@ -958,15 +965,15 @@ describe('machine', () => {
 
       expect(definition).toEqual({
         initial: 'state1',
-        states: {
+        stateOf: {
           state1: {
             def: {
               ...DFL_NORM_ST_DEF_DEF,
               pPath: '',
             },
             sub: {
-              dType: 'parallel',
-              states: {},
+              dType: 'regions',
+              stateOf: {},
             },
           },
           state2: {
@@ -978,7 +985,7 @@ describe('machine', () => {
               internalEvents: {
                 ':childDone:': {
                   cond: expect.any(Function),
-                  transitions: [{ to: 'state3', fullTo: '/state3', actions: [], guards: [] }]
+                  transitions: [{ to: 'state3', fullTo: '/state3', actions: [], guards: [] }],
                 },
               },
               events: {
@@ -986,8 +993,8 @@ describe('machine', () => {
               },
             },
             sub: {
-              dType: 'parallel',
-              states: {
+              dType: 'regions',
+              stateOf: {
                 region1: {
                   def: {
                     ...DFL_NORM_ST_DEF_DEF,
@@ -995,13 +1002,20 @@ describe('machine', () => {
                   },
                   sub: {
                     initial: 'subState1',
-                    states: {
+                    stateOf: {
                       subState1: {
                         def: {
                           ...DFL_NORM_ST_DEF_DEF,
                           pPath: '/state2/region1',
                           events: {
-                            subEvent1: [{ to: 'subState2', fullTo: '/state2/region1/subState2', guards: [], actions: [] }],
+                            subEvent1: [
+                              {
+                                to: 'subState2',
+                                fullTo: '/state2/region1/subState2',
+                                guards: [],
+                                actions: [],
+                              },
+                            ],
                           },
                         },
                         sub: null,
@@ -1020,16 +1034,23 @@ describe('machine', () => {
                     internalEvents: {
                       ':childDone:': {
                         cond: expect.any(Function),
-                        transitions: [{ actions: [expect.any(Function)], guards: [] }]
+                        transitions: [{ actions: [expect.any(Function)], guards: [] }],
                       },
                     },
                     events: {
-                      event3: [{ to: 'subState2', fullTo: '/state2/region2/subState2', guards: [], actions: [] }],
+                      event3: [
+                        {
+                          to: 'subState2',
+                          fullTo: '/state2/region2/subState2',
+                          guards: [],
+                          actions: [],
+                        },
+                      ],
                     },
                   },
                   sub: {
                     initial: 'subState1',
-                    states: {
+                    stateOf: {
                       subState1: {
                         def: { ...DFL_NORM_ST_DEF_DEF, pPath: '/state2/region2' },
                         sub: null,
@@ -1048,7 +1069,7 @@ describe('machine', () => {
                   },
                   sub: {
                     initial: undefined,
-                    states: {},
+                    stateOf: {},
                   },
                 },
                 region4: {
@@ -1058,7 +1079,7 @@ describe('machine', () => {
                   },
                   sub: {
                     initial: undefined,
-                    states: {},
+                    stateOf: {},
                   },
                 },
               },
@@ -1130,10 +1151,10 @@ describe('machine', () => {
       )
 
       expect(regionPaths).toEqual([
-        "/state1/region2/subState1/subRegion1",
-        "/state1/region2/subState1/subRegion2",
-        "/state1/region1",
-        "/state1/region2",
+        '/state1/region2/subState1/subRegion1',
+        '/state1/region2/subState1/subRegion2',
+        '/state1/region1',
+        '/state1/region2',
       ])
 
       expect([...stateCatalog.keys()]).toEqual([
@@ -1157,7 +1178,7 @@ describe('machine', () => {
 
       expect(definition).toEqual({
         initial: 'state1',
-        states: {
+        stateOf: {
           state1: {
             def: {
               ...DFL_NORM_ST_DEF_DEF,
@@ -1165,18 +1186,18 @@ describe('machine', () => {
               internalEvents: {
                 ':childDone:': {
                   cond: expect.any(Function),
-                  transitions: [{ to: 'state2', fullTo: '/state2', actions: [], guards: [] }]
+                  transitions: [{ to: 'state2', fullTo: '/state2', actions: [], guards: [] }],
                 },
               },
             },
             sub: {
-              dType: 'parallel',
-              states: {
+              dType: 'regions',
+              stateOf: {
                 region1: {
                   def: { ...DFL_NORM_ST_DEF_DEF, pPath: '/state1' },
                   sub: {
                     initial: 'subState1',
-                    states: {
+                    stateOf: {
                       subState1: {
                         def: {
                           ...DFL_NORM_ST_DEF_DEF,
@@ -1184,19 +1205,28 @@ describe('machine', () => {
                           internalEvents: {
                             ':childDone:': {
                               cond: expect.any(Function),
-                              transitions: [{ to: 'subState2', fullTo: '/state1/region1/subState2', actions: [], guards: [] }]
+                              transitions: [
+                                { to: 'subState2', fullTo: '/state1/region1/subState2', actions: [], guards: [] },
+                              ],
                             },
                           },
                         },
                         sub: {
                           initial: 'subSubState1',
-                          states: {
+                          stateOf: {
                             subSubState1: {
                               def: {
                                 ...DFL_NORM_ST_DEF_DEF,
                                 pPath: '/state1/region1/subState1',
                                 events: {
-                                  subEvent1: [{ to: 'subSubState2', fullTo: '/state1/region1/subState1/subSubState2', guards: [], actions: [] }],
+                                  subEvent1: [
+                                    {
+                                      to: 'subSubState2',
+                                      fullTo: '/state1/region1/subState1/subSubState2',
+                                      guards: [],
+                                      actions: [],
+                                    },
+                                  ],
                                 },
                               },
                               sub: null,
@@ -1219,7 +1249,7 @@ describe('machine', () => {
                   def: { ...DFL_NORM_ST_DEF_DEF, pPath: '/state1' },
                   sub: {
                     initial: 'subState1',
-                    states: {
+                    stateOf: {
                       subState1: {
                         def: {
                           ...DFL_NORM_ST_DEF_DEF,
@@ -1227,13 +1257,15 @@ describe('machine', () => {
                           internalEvents: {
                             ':childDone:': {
                               cond: expect.any(Function),
-                              transitions: [{ to: '../subState2', fullTo: '/state1/region2/subState2', actions: [], guards: [] }]
+                              transitions: [
+                                { to: '../subState2', fullTo: '/state1/region2/subState2', actions: [], guards: [] },
+                              ],
                             },
                           },
                         },
                         sub: {
-                          dType: 'parallel',
-                          states: {
+                          dType: 'regions',
+                          stateOf: {
                             subRegion1: {
                               def: {
                                 ...DFL_NORM_ST_DEF_DEF,
@@ -1241,13 +1273,20 @@ describe('machine', () => {
                               },
                               sub: {
                                 initial: 'subSubState3',
-                                states: {
+                                stateOf: {
                                   subSubState3: {
                                     def: {
                                       ...DFL_NORM_ST_DEF_DEF,
                                       pPath: '/state1/region2/subState1/subRegion1',
                                       events: {
-                                        subEvent1: [{ to: 'subSubState4', fullTo: '/state1/region2/subState1/subRegion1/subSubState4', guards: [], actions: [] }],
+                                        subEvent1: [
+                                          {
+                                            to: 'subSubState4',
+                                            fullTo: '/state1/region2/subState1/subRegion1/subSubState4',
+                                            guards: [],
+                                            actions: [],
+                                          },
+                                        ],
                                       },
                                     },
                                     sub: null,
@@ -1267,13 +1306,20 @@ describe('machine', () => {
                               def: { ...DFL_NORM_ST_DEF_DEF, pPath: '/state1/region2/subState1' },
                               sub: {
                                 initial: 'subSubState5',
-                                states: {
+                                stateOf: {
                                   subSubState5: {
                                     def: {
                                       ...DFL_NORM_ST_DEF_DEF,
                                       pPath: '/state1/region2/subState1/subRegion2',
                                       events: {
-                                        subEvent2: [{ to: 'subSubState6', fullTo: '/state1/region2/subState1/subRegion2/subSubState6', guards: [], actions: [] }],
+                                        subEvent2: [
+                                          {
+                                            to: 'subSubState6',
+                                            fullTo: '/state1/region2/subState1/subRegion2/subSubState6',
+                                            guards: [],
+                                            actions: [],
+                                          },
+                                        ],
                                       },
                                     },
                                     sub: null,
@@ -1330,29 +1376,33 @@ describe('machine', () => {
         ({ on, invoke, subStates }) => ({
           state1: [
             invoke(
-              { input: ({ c }) => c.count, },
+              { input: ({ c }) => c.count },
               'increment',
               on('done', {
-                to: 'state2', actions: ({ e, update }) => update({ count: e.data })
+                to: 'state2',
+                actions: ({ e, update }) => update({ count: e.data }),
               }),
               on('error', {
-                to: 'state3', actions: ({ e }) => e.error
+                to: 'state3',
+                actions: ({ e }) => e.error,
               }),
             ),
             invoke(
               { input: ({ c }) => c.count },
               async (count) => 'aiu' as const,
               on('done', {
-                to: 'state2', actions: ({ e, update, c }) => {
+                to: 'state2',
+                actions: ({ e, update, c }) => {
                   update({
-                    count: e.data
+                    count: e.data,
                   })
-                }
+                },
               }),
               on('error', {
-                to: 'state3', actions: ({ e }) => e.error
+                to: 'state3',
+                actions: ({ e }) => e.error,
               }),
-            )
+            ),
           ],
           state2: [
             on(':childDone:', { to: 'state3' }),
@@ -1363,15 +1413,16 @@ describe('machine', () => {
                   (count) => '',
                   //(f)=>1,
                   on('done', {
-                    to: 'subState2', actions: ({ e, update, c }) => {
+                    to: 'subState2',
+                    actions: ({ e, update, c }) => {
                       update({ count: e.data })
-                    }
+                    },
                   }),
                   on('error', { actions: ({ e }) => e.error }),
-                )
+                ),
               ],
               subState2: null,
-            })
+            }),
           ],
           state3: [],
         }),
@@ -1389,7 +1440,7 @@ describe('machine', () => {
 
       expect(definition).toEqual({
         initial: 'state1',
-        states: {
+        stateOf: {
           state1: {
             def: {
               ...DFL_NORM_ST_DEF_DEF,
@@ -1409,7 +1460,7 @@ describe('machine', () => {
               internalEvents: {
                 '(invocation-0)/done': {
                   cond: expect.any(Function),
-                  transitions: [{ to: 'state2', fullTo: '/state2', actions: [expect.any(Function)], guards: [], }],
+                  transitions: [{ to: 'state2', fullTo: '/state2', actions: [expect.any(Function)], guards: [] }],
                 },
                 '(invocation-0)/error': {
                   cond: expect.any(Function),
@@ -1417,13 +1468,13 @@ describe('machine', () => {
                 },
                 '(invocation-1)/done': {
                   cond: expect.any(Function),
-                  transitions: [{ to: 'state2', fullTo: '/state2', actions: [expect.any(Function)], guards: [], }],
+                  transitions: [{ to: 'state2', fullTo: '/state2', actions: [expect.any(Function)], guards: [] }],
                 },
                 '(invocation-1)/error': {
                   cond: expect.any(Function),
                   transitions: [{ to: 'state3', fullTo: '/state3', actions: [expect.any(Function)], guards: [] }],
                 },
-              }
+              },
             },
             sub: null,
           },
@@ -1434,13 +1485,13 @@ describe('machine', () => {
               internalEvents: {
                 ':childDone:': {
                   cond: expect.any(Function),
-                  transitions: [{ to: 'state3', fullTo: '/state3', actions: [], guards: [] }]
-                }
+                  transitions: [{ to: 'state3', fullTo: '/state3', actions: [], guards: [] }],
+                },
               },
             },
             sub: {
               initial: 'subState1',
-              states: {
+              stateOf: {
                 subState1: {
                   def: {
                     ...DFL_NORM_ST_DEF_DEF,
@@ -1455,15 +1506,17 @@ describe('machine', () => {
                     internalEvents: {
                       'state2-invocation/done': {
                         cond: expect.any(Function),
-                        transitions: [{ to: 'subState2', fullTo: '/state2/subState2', actions: [expect.any(Function)], guards: [] }],
+                        transitions: [
+                          { to: 'subState2', fullTo: '/state2/subState2', actions: [expect.any(Function)], guards: [] },
+                        ],
                       },
                       'state2-invocation/error': {
                         cond: expect.any(Function),
                         transitions: [{ actions: [expect.any(Function)], guards: [] }],
                       },
-                    }
+                    },
                   },
-                  sub: null
+                  sub: null,
                 },
                 subState2: {
                   def: {
@@ -1471,9 +1524,9 @@ describe('machine', () => {
                     pPath: '/state2',
                     final: true,
                   },
-                  sub: null
-                }
-              }
+                  sub: null,
+                },
+              },
             },
           },
           state3: {
@@ -1481,8 +1534,7 @@ describe('machine', () => {
             sub: null,
           },
         },
-      },
-      )
+      })
     })
 
     test('9.1: 不正な Transition: 通常イベント', async () => {
@@ -1523,13 +1575,7 @@ describe('machine', () => {
             initContext: () => ({ count: 1 }),
           },
           ({ on, invoke }) => ({
-            state1: [
-              invoke(
-                {}, () => null,
-                on('done', { to: 'state2' }),
-                on('error', { to: 'hoge' }),
-              )
-            ],
+            state1: [invoke({}, () => null, on('done', { to: 'state2' }), on('error', { to: 'hoge' }))],
             state2: null,
           }),
         ),
@@ -1552,10 +1598,12 @@ describe('machine', () => {
         ({ on, subStates }) => ({
           state1: [
             on('event1', {
-              to: './subState2', guard: (({ c }) => true)
+              to: './subState2',
+              guard: ({ c }) => true,
             }),
             on('event3', {
-              to: '/state2', guard: (({ c }) => true)
+              to: '/state2',
+              guard: ({ c }) => true,
             }),
             on(':childDone:', { to: '../state2' }),
             subStates({
@@ -1587,7 +1635,7 @@ describe('machine', () => {
 
       expect(definition).toEqual({
         initial: 'state1',
-        states: {
+        stateOf: {
           state1: {
             def: {
               ...DFL_NORM_ST_DEF_DEF,
@@ -1595,17 +1643,19 @@ describe('machine', () => {
               internalEvents: {
                 ':childDone:': {
                   cond: expect.any(Function),
-                  transitions: [{ to: '../state2', fullTo: '/state2', actions: [], guards: [] }]
+                  transitions: [{ to: '../state2', fullTo: '/state2', actions: [], guards: [] }],
                 },
               },
               events: {
-                event1: [{ to: './subState2', fullTo: '/state1/subState2', guards: [expect.any(Function)], actions: [] }],
+                event1: [
+                  { to: './subState2', fullTo: '/state1/subState2', guards: [expect.any(Function)], actions: [] },
+                ],
                 event3: [{ to: '/state2', fullTo: '/state2', guards: [expect.any(Function)], actions: [] }],
               },
             },
             sub: {
               initial: 'subState1',
-              states: {
+              stateOf: {
                 subState1: {
                   def: {
                     ...DFL_NORM_ST_DEF_DEF,
@@ -1613,7 +1663,7 @@ describe('machine', () => {
                     internalEvents: {
                       ':childDone:': {
                         cond: expect.any(Function),
-                        transitions: [{ to: '/state2', fullTo: '/state2', actions: [], guards: [] }]
+                        transitions: [{ to: '/state2', fullTo: '/state2', actions: [], guards: [] }],
                       },
                     },
                     events: {
@@ -1622,13 +1672,15 @@ describe('machine', () => {
                   },
                   sub: {
                     initial: 'subSubState1',
-                    states: {
+                    stateOf: {
                       subSubState1: {
                         def: {
                           ...DFL_NORM_ST_DEF_DEF,
                           pPath: '/state1/subState1',
                           events: {
-                            event3: [{ to: 'subSubState2', fullTo: '/state1/subState1/subSubState2', guards: [], actions: [] }],
+                            event3: [
+                              { to: 'subSubState2', fullTo: '/state1/subState1/subSubState2', guards: [], actions: [] },
+                            ],
                           },
                         },
                         sub: null,
@@ -1638,7 +1690,14 @@ describe('machine', () => {
                           ...DFL_NORM_ST_DEF_DEF,
                           pPath: '/state1/subState1',
                           events: {
-                            event3: [{ to: '/state1/subState1/subSubState1', fullTo: '/state1/subState1/subSubState1', guards: [], actions: [] }],
+                            event3: [
+                              {
+                                to: '/state1/subState1/subSubState1',
+                                fullTo: '/state1/subState1/subSubState1',
+                                guards: [],
+                                actions: [],
+                              },
+                            ],
                           },
                         },
                         sub: null,

@@ -361,7 +361,7 @@ describe('Runtime', () => {
           exitHook(({ c, update }) => update({ trace: [...c.trace, 'processing.exit'] })),
         ],
         completed: [
-          { isFinal: true },
+          { final: true },
           entryHook(({ c, update }) => update({ trace: [...c.trace, 'completed.entry'] })),
         ],
       }),
@@ -392,19 +392,15 @@ describe('Runtime', () => {
   })
 
   describe('subState', () => {
-    let mockFn1: jest.Mock
-    beforeAll(async () => {
-      mockFn1 = jest.fn()
-    })
     const orderMachine = createMachine(
       {
         name: 'order',
         types: {
-          context: {} as { amount: number; balance: number },
+          context: {} as { amount: number; balance: number; trace: string[], doneOutput?: string },
           events: {} as { type: 'submit' } | { type: 'pay' } | { type: 'cancel' },
           input: {} as { amount: number; balance: number },
         },
-        initContext: ({ amount, balance }) => ({ amount, balance }),
+        initContext: ({ amount, balance }) => ({ amount, balance, trace: [] }),
         guards: {
           isValid: ({ c }) => c.amount > 0,
           hasFunds: ({ c }) => c.balance >= c.amount,
@@ -415,36 +411,46 @@ describe('Runtime', () => {
         },
       },
       ({ on, subStates, entryHook }) => ({
-        idle: [on('submit', { to: 'processing' })],
+        idle: [
+          entryHook(({ c, update }) => update({ trace: [...c.trace, '/idle'] })),
+          on('submit', { to: 'processing' }),
+        ],
         processing: [
-          on(':childDone:', { to: 'completed' }),
+          entryHook(({ c, update }) => update({ trace: [...c.trace, '/processing'] })),
+          on(':childDone:', {
+            to: 'completed',
+            actions: ({ e, update }) => update({ doneOutput: e.output as string }),
+          }),
           subStates({
             validating: [
-              entryHook('logValidated'),
+              entryHook(({ c, update }) => update({ trace: [...c.trace, '/processing/validating'] }), 'logValidated'),
               on(':always:', [{ to: 'paymentPending', guard: 'isValid' }, { to: 'rejected' }]),
             ],
             paymentPending: [
-              on(':always:', { to: '/completed' }), // TMP
+              //on(':always:', { to: '/completed' }), // TMP
+              entryHook(({ c, update }) => update({ trace: [...c.trace, '/processing/paymentPending'] })),
               on('pay', [{ to: 'success', guard: 'hasFunds', actions: 'debitBalance' }, { to: 'failed' }]),
             ],
-            success: null,
-            failed: null,
-            rejected: null,
+            success: [
+              { final: () => 'success' },
+              entryHook(({ c, update }) => update({ trace: [...c.trace, '/processing/success'] })),
+            ],
+            failed: [
+              { final: true },
+              entryHook(({ c, update }) => update({ trace: [...c.trace, '/processing/failed'] })),
+            ],
+            rejected: [
+              { final: true },
+              entryHook(({ c, update }) => update({ trace: [...c.trace, '/processing/rejected'] })),
+            ],
           }),
         ],
-        completed: null,
+        completed: [
+          { final: true },
+          entryHook(({ c, update }) => update({ trace: [...c.trace, '/completed'] }))
+        ],
       }),
     )
-
-    test.only('0:', async () => {
-      const rt = createRuntime(orderMachine, {
-        input: () => ({ amount: 100, balance: 100 }),
-      }).start()
-      expect(rt.stateValue).toEqual('/idle')
-      rt.send('submit')
-
-      expect(rt.stateValue).toEqual('/completed')
-    })
 
     test('1:subState 内の always から自動で兄弟ステートに遷移', async () => {
       const rt = createRuntime(orderMachine, {
@@ -454,10 +460,12 @@ describe('Runtime', () => {
       rt.send('submit')
 
       // isValid: amount > 0 なので always で paymentPending まで進んでいるはず
-      expect(rt.stateValue).toEqual('/processing/paymentPending')
+      expect(rt.stateValue).toBe('/processing/paymentPending')
+
+      expect(rt.context.trace).toEqual(['/idle', '/processing', '/processing/validating', '/processing/paymentPending'])
     })
 
-    test('2: childDone', async () => {
+    test('2: childDone 1', async () => {
       const rt = createRuntime(orderMachine, {
         input: () => ({ amount: 0, balance: 0 }),
       }).start()
@@ -467,6 +475,383 @@ describe('Runtime', () => {
       // /processing/rejected に到達し childDone が発火してるはず
       expect(rt.stateValue).toEqual('/completed')
       expect(rt.runtimeStatus).toBe('completed')
+
+      expect(rt.context.trace).toEqual([
+        '/idle',
+        '/processing',
+        '/processing/validating',
+        '/processing/rejected',
+        '/completed',
+      ])
     })
+
+    test('2: childDone 2', async () => {
+      const mockFn1 = jest.fn()
+      //orderMachine.actions.logValidated = mockFn1
+      const rt = createRuntime(orderMachine, {
+        input: () => ({ amount: 100, balance: 0 }),
+      }).start()
+      expect(rt.stateValue).toEqual('/idle')
+      rt.send('submit')
+
+      //expect(mockFn1).toHaveBeenCalledTimes(1)
+
+      // /processing/rejected に到達し childDone が発火してるはず
+      expect(rt.stateValue).toEqual('/processing/paymentPending')
+      expect(rt.runtimeStatus).toBe('active')
+
+      expect(rt.context.trace).toEqual(['/idle', '/processing', '/processing/validating', '/processing/paymentPending'])
+    })
+
+    test('3: 残高balance が足りてるので success に移行', async () => {
+      const rt = createRuntime(orderMachine, {
+        input: () => ({ amount: 100, balance: 200 }),
+      }).start()
+
+      rt.send('submit').send('pay')
+
+      expect(rt.context.trace).toEqual([
+        '/idle',
+        '/processing',
+        '/processing/validating',
+        '/processing/paymentPending',
+        '/processing/success',
+        '/completed',
+      ])
+      expect(rt.context.doneOutput).toBe('success')
+      expect(rt.runtimeStatus).toBe('completed')
+    })
+
+    test('3: 残高balance が足りないので failed に移行', async () => {
+      const rt = createRuntime(orderMachine, {
+        input: () => ({ amount: 100, balance: 0 }),
+      }).start()
+
+      rt.send('submit').send('pay')
+
+      expect(rt.context.trace).toEqual([
+        '/idle',
+        '/processing',
+        '/processing/validating',
+        '/processing/paymentPending',
+        '/processing/failed',
+        '/completed',
+      ])
+      expect(rt.context.doneOutput).toBe(undefined)
+      expect(rt.runtimeStatus).toBe('completed')
+    })
+  })
+
+  describe('parallel', () => {
+    const log = (name: string) => ({ update, c }: any) => update({ trace: [...c.trace, name] })
+
+    const machine = createMachine({
+      types: {
+        context: {} as { trace: string[], result?: unknown },
+        events: {} as { type: 'start' | 'ping' | 'go_all' | 'go_c1' | 'go_c2' | 'reset' }
+      },
+      initContext: () => ({ trace: [] }),
+    }, ({ on, entryHook, exitHook, parallel }) => ({
+      idle: [
+        entryHook(log('idle:entry')),
+        exitHook(log('idle:exit')),
+        on('start', { to: 'working' }),
+      ],
+      working: [
+        entryHook(log('working:entry')),
+        exitHook(log('working:exit')),
+        on(':childDone:', {
+          to: 'finished',
+          actions: [log('working:childDone'), ({ update, e }) => update({ result: e.output })],
+        }),
+        parallel({
+          regionA: [
+            [
+              entryHook(log('regionA:entry')),
+              exitHook(log('regionA:exit')),
+            ], {
+              a1: [
+                entryHook(log('a1:entry')),
+                exitHook(log('a1:exit')),
+                on('ping', { actions: log('a1:ping') }),
+                on('go_all', { to: 'a2' })
+              ],
+              a2: [
+                entryHook(log('a2:entry')),
+                exitHook(log('a2:exit')),
+                { final: true }
+              ]
+            }
+          ],
+          regionB: [
+            [
+              entryHook(log('regionB:entry')),
+              exitHook(log('regionB:exit')),
+            ], {
+              b1: [
+                entryHook(log('b1:entry')),
+                exitHook(log('b1:exit')),
+                on('ping', { actions: log('b1:ping') }),
+                on('go_all', { to: 'b2' })
+              ],
+              b2: [
+                entryHook(log('b2:entry')),
+                exitHook(log('b2:exit')),
+                { final: () => 'B' }
+              ]
+            }
+          ],
+          regionC: [
+            [
+              entryHook(log('regionC:entry')),
+              exitHook(log('regionC:exit')),
+            ], {
+              c: [
+                parallel({
+                  c1: [
+                    [
+                      entryHook(log('c1:entry')),
+                      exitHook(log('c1:exit')),
+                    ],
+                    {
+                      c1_1: [
+                        entryHook(log('c1_1:entry')),
+                        exitHook(log('c1_1:exit')),
+                        on('ping', { actions: log('c1_1:ping') }),
+                        on('go_c1', { to: 'c1_2' })
+                      ],
+                      c1_2: [
+                        entryHook(log('c1_2:entry')),
+                        exitHook(log('c1_2:exit')),
+                        { final: true },
+                      ]
+                    }
+                  ],
+                  c2: [
+                    [
+                      entryHook(log('c2:entry')),
+                      exitHook(log('c2:exit')),
+                    ],
+                    {
+                      c2_1: [
+                        entryHook(log('c2_1:entry')),
+                        exitHook(log('c2_1:exit')),
+                        on('ping', { actions: log('c2_1:ping') }),
+                        on('go_c2', { to: 'c2_2' })
+                      ],
+                      c2_2: [
+                        entryHook(log('c2_2:entry')),
+                        exitHook(log('c2_2:exit')),
+                        { final: () => 'C2' },
+                      ]
+                    }
+                  ]
+                })
+              ],
+            }
+          ],
+        }),
+      ],
+      finished: [
+        entryHook(log('finished:entry')),
+        exitHook(log('finished:exit')),
+        on('reset', { to: 'idle' })
+      ]
+    }))
+    //console.log(`DBG:100: `, machine.definition.stateOf.working.sub?.stateOf)
+
+    /** 直前の確認以降に増えた trace だけを取り出す */
+    const makeTracer = (runtime: ReturnType<typeof createRuntime<any, any, any, any, any, any, any, any, any>>) => {
+      let mark = 0;
+      return () => {
+        const all = runtime.context.trace;
+        const diff = all.slice(mark);
+        mark = all.length;
+        return diff;
+      };
+    };
+
+    /** 順序を問わず要素が一致すること（並列リージョン間の順序に依存させないため） */
+    const sameMembers = (actual: string[], expected: string[]) =>
+      expect([...actual].sort()).toEqual([...expected].sort());
+
+    test('0:開始すると idle に入る', async () => {
+      const rt = createRuntime(machine).start()
+      const take = makeTracer(rt)
+      expect(take()).toEqual(['idle:entry'])
+    })
+
+    test('0:send "start" で全リージョンのentryが実行される', async () => {
+      const rt = createRuntime(machine).start()
+      const take = makeTracer(rt)
+      take() // 初期分を捨てる
+
+      rt.send('start')
+
+      expect(rt.states).toEqual([
+        '/working/regionA/a1',
+        '/working/regionB/b1',
+        '/working/regionC/c/c1/c1_1',
+        '/working/regionC/c/c2/c2_1'
+      ])
+      expect(rt.stateValue).toEqual([
+        '/working/regionA/a1',
+        '/working/regionB/b1',
+        '/working/regionC/c/c1/c1_1',
+        '/working/regionC/c/c2/c2_1'
+      ])
+      const t = take()
+      expect(t[0]).toEqual('idle:exit')
+      expect(t.slice(1)).toEqual([
+        "working:entry",
+        "regionA:entry",
+        "a1:entry",
+        "regionB:entry",
+        "b1:entry",
+        "regionC:entry",
+        "c1:entry",
+        "c1_1:entry",
+        "c2:entry",
+        "c2_1:entry",
+      ])
+    })
+
+    test('0:複数リージョンで同じイベントが同時に実行', async () => {
+      const rt = createRuntime(machine).start()
+      rt.send('start')
+      const take = makeTracer(rt)
+      take()
+
+      rt.send('ping')
+      expect(take()).toEqual(["a1:ping", "b1:ping", "c1_1:ping", "c2_1:ping"])
+    })
+
+    test('0:同時に遷移。childDone はまだ動かない。', async () => {
+      const rt = createRuntime(machine).start()
+      rt.send('start')
+      const take = makeTracer(rt)
+      take()
+      expect(rt.states).toEqual([
+        "/working/regionA/a1",
+        "/working/regionB/b1",
+        "/working/regionC/c/c1/c1_1",
+        "/working/regionC/c/c2/c2_1",
+      ])
+
+      rt.send('go_all')
+      expect(take()).toEqual(["a1:exit", "b1:exit", "a2:entry", "b2:entry"])
+      expect(rt.states).toEqual([
+        "/working/regionA/a2",
+        "/working/regionB/b2",
+        "/working/regionC/c/c1/c1_1",
+        "/working/regionC/c/c2/c2_1",
+      ])
+      expect(rt.context.trace).not.toContain('working:childDone')
+    })
+
+    test('0:入れ子のparallel の片方だけ完了では childDoneにならない', async () => {
+      const rt = createRuntime(machine).start()
+      rt.send('start')
+      rt.send('go_all')
+      const take = makeTracer(rt)
+      take()
+
+      rt.send('go_c1')
+      expect(take()).toEqual(["c1_1:exit", "c1_2:entry"])
+      expect(rt.states).toEqual([
+        "/working/regionA/a2",
+        "/working/regionB/b2",
+        "/working/regionC/c/c1/c1_2",
+        "/working/regionC/c/c2/c2_1",
+      ])
+      expect(rt.context.trace).not.toContain('working:childDone')
+    })
+
+    test('0:全リージョンの終了で childDone が動き /finishedに遷移', async () => {
+      const rt = createRuntime(machine).start()
+      rt.send('start')
+      rt.send('go_all')
+      rt.send('go_c1')
+      const take = makeTracer(rt)
+      take()
+
+      rt.send('go_c2')
+      const t = take()
+      expect(rt.states).toEqual(['/finished'])
+      expect(t).toEqual([
+        "c2_1:exit",
+        "c2_2:entry",
+        "working:childDone", // TBC: childDone のタイミングはこれでいいのか？
+        "a2:exit",
+        "regionA:exit",
+        "b2:exit",
+        "regionB:exit",
+        "c1_2:exit",
+        "c1:exit",
+        "c2_2:exit",
+        "c2:exit",
+        "regionC:exit",
+        "working:exit",
+        "finished:entry",
+      ])
+      expect(rt.context.trace).toEqual([
+        "idle:entry", "idle:exit", "working:entry", "regionA:entry", "a1:entry", "regionB:entry", "b1:entry",
+        "regionC:entry", "c1:entry", "c1_1:entry", "c2:entry", "c2_1:entry", "a1:exit", "b1:exit", "a2:entry",
+        "b2:entry", "c1_1:exit", "c1_2:entry", "c2_1:exit", "c2_2:entry", "working:childDone", "a2:exit",
+        "regionA:exit", "b2:exit", "regionB:exit", "c1_2:exit", "c1:exit", "c2_2:exit", "c2:exit", "regionC:exit",
+        "working:exit", "finished:entry"
+      ])
+    })
+
+    test('0: childDone の output の内容確認', async () => {
+      const rt = createRuntime(machine).start()
+      rt.send('start')
+      rt.send('go_all')
+      rt.send('go_c1')
+      rt.send('go_c2')
+
+      expect(rt.context.result).toEqual({
+        regionB: 'B',
+        regionC: {
+          'c2': 'C2',
+        },
+      })
+    })
+
+    test('0:イベントの順序が違っても動く', async () => {
+      const rt = createRuntime(machine).start()
+      rt.send('start')
+      rt.send('go_c2')
+      rt.send('go_c1')
+
+      expect(rt.states.every(e => e.startsWith('/working'))).toBe(true)
+
+      rt.send('go_all')
+
+      expect(rt.states).toEqual(['/finished'])
+      expect(rt.context.result).toEqual({
+        regionB: 'B',
+        regionC: {
+          'c2': 'C2',
+        },
+      })
+    })
+
+    test('0:', async () => {
+      const rt = createRuntime(machine).start()
+      rt.send('start')
+      rt.send('go_all')
+      rt.send('go_c1')
+      rt.send('go_c2')
+      const take = makeTracer(rt)
+      take()
+
+      rt.send('reset')
+
+      expect(take()).toEqual([
+        "finished:exit", "idle:entry"
+      ])
+    })
+
   })
 })

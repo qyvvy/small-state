@@ -2,33 +2,35 @@ import type {
   EmitFn,
   EmittedEvent,
   EventBody,
-  GlobalStDefItem,
+  FnBaseParams,
   InternalEPayload,
   InternalEventBody,
   Machine,
   MContext,
   NormalizedAction,
   NormalizedDefinition,
-  NStateItemDef,
+  TopLvStDefItem,
 } from '../machine/m.types'
 import { MICROSTEP_LOOP_LIMIT, ST_DELIM } from '../shared/constants'
-import type { Placeholder, RecursiveRecord } from '../shared/general.types'
+import type { Placeholder } from '../shared/general.types'
 import { splitStPath } from '../shared/utils'
+import type { StateRoute } from './r.types'
 import type { EnqueueEventFn, TransitionExec } from './runtime_step.core'
 import {
-  deleteNodeFromStateTree,
   deriveEventTransition,
   evalAlwaysEvent,
   genChildDoneEvents,
-  genExitPaths,
+  genExitPathsAndDeleteFromCrrStates,
   launchInvocations,
   readyAction,
-  updateStateTreeForEntry,
+  updateStateRouteForEntry,
 } from './runtime_step.core'
 
-function execTExecActions(
+function execTExecActions<Ep extends EventBody>(
   tExecs: TransitionExec[],
   actionRunner: ReturnType<typeof readyAction<any, any, any, any, any, any, any>>,
+  errLocation: string,
+  providedEvent?: Ep
 ) {
   const { execAction, processQueue } = actionRunner
 
@@ -36,18 +38,18 @@ function execTExecActions(
   try {
     for (const tExec of tExecs) {
       for ([i, action] of tExec.transition.actions.entries()) {
-        execAction(action)
+        execAction(action, providedEvent)
         processQueue()
       }
     }
   } catch (err) {
-    const { from, tIndex } = tExec!
+    const { lca, tIndex } = tExec!
     if (!(err instanceof Error)) {
       throw new Error(
-        `Unknown error occurred in state "${from}", transition[${tIndex}], actions[${i!}]: ${String(err)}`,
+        `Unknown error occurred in state "${lca}", ${errLocation}[${tIndex}], actions[${i!}]: ${String(err)}`,
       )
     }
-    throw new Error(`Error occurred in state "${from}", transition[${tIndex}], actions[${i!}]`, { cause: err })
+    throw new Error(`Error occurred in state "${lca}", ${errLocation}[${tIndex}], actions[${i!}]`, { cause: err })
   }
 }
 
@@ -63,12 +65,12 @@ export function initRuntime<
   realContext: C,
   input: I,
   emit: EmitFn<EM>,
-  crrStateTree: RecursiveRecord,
+  crrStates: StateRoute,
   machine: Machine<C, E, I, EM, any, G, A, any, ND>,
   enqueueEvent: EnqueueEventFn<E>,
   event: E = { type: ':init:' } as E,
 ) {
-  const { definition, guards, actions, globalDefItem } = machine
+  const { definition, guards, actions, topLvDefItem } = machine
   const { initial } = definition
 
   const actionRunner = readyAction<C, E, I, EM, G, A>(realContext, event, input, guards, actions, emit)
@@ -79,11 +81,11 @@ export function initRuntime<
       tIndex: -1, // dummy
     },
   ]
-  const hasTransitioned = runMicrosteps(tExecs, crrStateTree, actionRunner, machine, enqueueEvent, globalDefItem)
+  const hasTransitioned = runMicrosteps(tExecs, crrStates, actionRunner, machine, enqueueEvent, topLvDefItem)
 
   {
     const { context } = actionRunner.getResult()
-    return { context, stateTree: crrStateTree, hasTransitioned }
+    return { context, crrStates, hasTransitioned }
   }
 }
 
@@ -99,32 +101,31 @@ export function macrostep<
 >(
   eType: Ex['type'],
   internalEPayload: InternalEPayload | undefined,
-  crrStateTree: RecursiveRecord,
+  crrStates: StateRoute,
   actionRunner: ReturnType<typeof readyAction<C, E, I, EM, G, A, Ex>>,
   machine: Machine<C, E, I, EM, any, G, A, any, ND>,
   enqueueEvent: EnqueueEventFn<E>,
-  globalDefItem: GlobalStDefItem<E['type']>,
+  topLvDefItem: TopLvStDefItem<E['type']>,
 ) {
-  const { guards, stateCatalog, regionPaths } = machine
+  const { guards, stateCatalog } = machine
 
   const tExecs = deriveEventTransition(
     eType,
     internalEPayload,
     actionRunner.makeFnBaseParam(),
-    crrStateTree,
+    crrStates,
     guards,
     stateCatalog,
-    regionPaths,
-    globalDefItem,
+    topLvDefItem,
   )
 
-  execTExecActions(tExecs, actionRunner)
+  execTExecActions(tExecs, actionRunner, 'transition')
 
-  const hasTransitioned = runMicrosteps(tExecs, crrStateTree, actionRunner, machine, enqueueEvent, globalDefItem)
+  const hasTransitioned = runMicrosteps(tExecs, crrStates, actionRunner, machine, enqueueEvent, topLvDefItem)
 
   {
     const { context } = actionRunner.getResult()
-    return { context, stateTree: crrStateTree, hasTransitioned }
+    return { context, crrStates, hasTransitioned }
   }
 }
 
@@ -139,26 +140,15 @@ function runMicrosteps<
   ND extends NormalizedDefinition,
 >(
   tExecs: TransitionExec[],
-  crrStateTree: RecursiveRecord,
+  crrStates: StateRoute,
   actionRunner: ReturnType<typeof readyAction<C, E, I, EM, G, A, Ex>>,
   machine: Machine<C, E, I, EM, any, G, A, any, ND>,
   enqueueEvent: EnqueueEventFn<E>,
-  globalDefItem: GlobalStDefItem<E['type']>,
+  topLvDefItem: TopLvStDefItem<E['type']>,
 ) {
-  const { regionPaths } = machine
-  const regionPathSet = new Set(regionPaths)
-  //const doneBranches: DoneBranch[] = []
   const internalQueue: Array<[EventBody, InternalEPayload]> = []
 
-  let hasTransitioned = runExitAndEntryThenAlways(
-    tExecs,
-    crrStateTree,
-    actionRunner,
-    machine,
-    enqueueEvent,
-    internalQueue,
-    regionPathSet,
-  )
+  let hasTransitioned = runExitAndEntryThenAlways(tExecs, crrStates, actionRunner, machine, enqueueEvent, internalQueue)
 
   const { guards, stateCatalog } = machine
   const { makeFnBaseParam } = actionRunner
@@ -168,25 +158,16 @@ function runMicrosteps<
       event.type,
       payload,
       makeFnBaseParam(),
-      crrStateTree,
+      crrStates,
       guards,
       stateCatalog,
-      regionPaths,
-      globalDefItem,
+      topLvDefItem,
     )
 
-    execTExecActions(internalTExecs, actionRunner)
+    execTExecActions(internalTExecs, actionRunner, event.type, event)
 
-    const tmp = runExitAndEntryThenAlways(
-      internalTExecs,
-      crrStateTree,
-      actionRunner,
-      machine,
-      enqueueEvent,
-      internalQueue,
-      regionPathSet,
-    )
-    hasTransitioned ||= tmp
+    hasTransitioned =
+      runExitAndEntryThenAlways(internalTExecs, crrStates, actionRunner, machine, enqueueEvent, internalQueue) || hasTransitioned
   }
 
   return hasTransitioned
@@ -203,35 +184,25 @@ function runExitAndEntryThenAlways<
   ND extends NormalizedDefinition,
 >(
   tExecs: TransitionExec[],
-  crrStateTree: RecursiveRecord,
+  crrStates: StateRoute,
   actionRunner: ReturnType<typeof readyAction<C, E, I, EM, G, A, Ex>>,
   machine: Machine<C, E, I, EM, any, G, A, any, ND>,
   enqueueEvent: EnqueueEventFn<E>,
   internalQueue: Array<[EventBody, InternalEPayload]>,
-  regionPathSet: Set<string>,
 ) {
   let [alwaysTExecs, hasTransitioned] = exitAndEntry(
     tExecs,
-    crrStateTree,
+    crrStates,
     actionRunner,
     machine,
     enqueueEvent,
     internalQueue,
-    regionPathSet,
   )
 
   let i = 0
   while (alwaysTExecs.length) {
     let tmp: boolean
-      ;[alwaysTExecs, tmp] = exitAndEntry(
-        alwaysTExecs,
-        crrStateTree,
-        actionRunner,
-        machine,
-        enqueueEvent,
-        internalQueue,
-        regionPathSet,
-      )
+      ;[alwaysTExecs, tmp] = exitAndEntry(alwaysTExecs, crrStates, actionRunner, machine, enqueueEvent, internalQueue)
     hasTransitioned ||= tmp
     if (++i > MICROSTEP_LOOP_LIMIT) {
       throw new Error(`Maximum number of microsteps exceeded`)
@@ -251,22 +222,20 @@ function exitAndEntry<
   ND extends NormalizedDefinition,
 >(
   tExecs: TransitionExec[],
-  crrStateTree: RecursiveRecord,
+  crrStates: StateRoute,
   actionRunner: ReturnType<typeof readyAction<C, E, I, EM, G, A, Ex>>,
-  { guards, services, stateCatalog, regionPaths, definition }: Machine<C, E, I, EM, any, G, A, any, ND>,
+  { guards, services, stateCatalog, definition }: Machine<C, E, I, EM, any, G, A, any, ND>,
   enqueueEvent: EnqueueEventFn<E>,
   internalQueue: Array<[EventBody, InternalEPayload]>,
-  regionPathSet: Set<string>,
 ): [TransitionExec[], hasTransitioned: boolean] {
   const { makeFnBaseParam, execAction, processQueue } = actionRunner
 
-  for (const { from } of tExecs) {
-    if (!from) {
+  for (const { lca, transition } of tExecs) {
+    if (lca === undefined) {
       continue
     }
-    const fromPathStateSplitted = splitStPath(from)
     {
-      const exitPaths = genExitPaths(from, crrStateTree, fromPathStateSplitted)
+      const exitPaths = genExitPathsAndDeleteFromCrrStates(crrStates, lca, transition.fullTo!)
       let i: number, action: NormalizedAction
       try {
         for (const pth of exitPaths) {
@@ -284,17 +253,10 @@ function exitAndEntry<
         }
       } catch (err) {
         if (!(err instanceof Error)) {
-          throw new Error(`Unknown error occurred during exit "${from}", exitHooks[${i!}]: ${String(err)}`)
+          throw new Error(`Unknown error occurred during exit under "${lca}", exitHooks[${i!}]: ${String(err)}`)
         }
-        throw new Error(`Error occurred during exit "${from}", exitHooks[${i!}]`, { cause: err })
+        throw new Error(`Error occurred during exit under "${lca}", exitHooks[${i!}]`, { cause: err })
       }
-    }
-    if (tExecs?.[0]?.from === '/processing/rejected') {
-      console.log(`DBG:205: `, tExecs, crrStateTree, fromPathStateSplitted)
-    }
-    deleteNodeFromStateTree(fromPathStateSplitted, crrStateTree)
-    if (tExecs?.[0]?.from === '/processing/rejected') {
-      console.log(`DBG:206: `, crrStateTree)
     }
   }
 
@@ -302,26 +264,25 @@ function exitAndEntry<
 
   // NOTE: updateStateTreeForEntry は stChangingTExecs が空でも末端リーフ追加して遷移先とするので遷移先がなければ明示的にスキップする必要がある
   if (stChangingTExecs.length) {
-    const reachedFinalStateItems = new Set<NStateItemDef<string>>()
+    const accReachedFinal: [
+      pPath: string,
+      isRegionChild: boolean | undefined,
+      final: boolean | ((args: FnBaseParams<C, Ex, I>[0]) => unknown),
+    ][] = []
     const fullToSplittees = stChangingTExecs.map(({ transition }) => splitStPath(transition.fullTo!))
-    const enteredStItemDefs = updateStateTreeForEntry(fullToSplittees, crrStateTree, definition)
+    const enteredStItemDefs = updateStateRouteForEntry(fullToSplittees, crrStates, definition)
     let i = 0,
       j: number,
       action: NormalizedAction
     try {
-      if (tExecs?.[0]?.from === '/processing/rejected') {
-        console.log(`DBG:207: `, crrStateTree)
-      }
-      for (const [stateName, stateNode, def] of enteredStItemDefs) {
-        if (tExecs?.[0]?.from === '/processing/rejected') {
-          console.log(`DBG:208: `, crrStateTree)
-        }
+      for (const [def, additional] of enteredStItemDefs) {
         const { invocations, entryHooks, final, pPath } = def
         if (invocations.length) {
+          const { stateName, routeEl } = additional
           launchInvocations(
             invocations,
             `${pPath}${ST_DELIM}${stateName}`,
-            stateNode,
+            routeEl,
             makeFnBaseParam,
             services,
             enqueueEvent,
@@ -334,7 +295,7 @@ function exitAndEntry<
           }
         }
         if (final) {
-          reachedFinalStateItems.add(def)
+          accReachedFinal.push([pPath, additional.isRegionChild, final])
         }
         i += 1
       }
@@ -345,30 +306,11 @@ function exitAndEntry<
       }
       throw new Error(`Error occurred during entry "${pth}", exitHooks[${i!}]`, { cause: err })
     }
-    internalQueue.push(...genChildDoneEvents(reachedFinalStateItems, regionPathSet, crrStateTree, stateCatalog))
+    internalQueue.push(...genChildDoneEvents(accReachedFinal, makeFnBaseParam(), crrStates, stateCatalog))
   }
 
-  const alwaysTExecs = evalAlwaysEvent(makeFnBaseParam(), crrStateTree, guards, stateCatalog, regionPaths)
-  {
-    let i: number, tExec: TransitionExec, action: NormalizedAction
-    try {
-      for (const tExec of alwaysTExecs) {
-        for ([i, action] of tExec.transition.actions.entries()) {
-          execAction(action)
-          processQueue()
-        }
-      }
-    } catch (err) {
-      const { from, tIndex } = tExec!
-      if (!(err instanceof Error)) {
-        throw new Error(
-          `Unknown error occurred in state "${from}", :always:[${tIndex}], actions[${i!}]: ${String(err)}`,
-        )
-      }
-      throw new Error(`Error occurred in state "${from}", :always:[${tIndex}], actions[${i!}]`, { cause: err })
-    }
-  }
+  const alwaysTExecs = evalAlwaysEvent(makeFnBaseParam(), crrStates, guards, stateCatalog)
+  execTExecActions(alwaysTExecs, actionRunner, ':always:')
 
   return [alwaysTExecs, !!stChangingTExecs.length]
 }
-

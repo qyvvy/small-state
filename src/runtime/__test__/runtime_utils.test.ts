@@ -1,80 +1,169 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, jest, mock, test } from 'bun:test'
-import { traverseStateTreeMatch } from '../runtime_utils'
-
+import { traverseStateRouteMatch } from '../runtime_utils'
+import { objectifyRouteString } from './helper'
 
 describe('runtime_utils', () => {
   beforeAll(async () => { })
 
-  describe('traverseStateTreeMatch()', () => {
-    // 第一引数に指定した道順に沿って、第二引数を辿る関数
-    describe('01:', () => {
-      test('1: 第一引数が空なら index は -1', async () => {
-        expect(traverseStateTreeMatch(
-          [],
-          { x: {} },
-        )).toEqual(
-          {
-            endIdx: -1,
-            remaining: { x: {} },
-            isExhausted: true,
-          }
-        )
+  describe('traverseStateRouteMatch', () => {
+    // 第二引数に指定した通りに StateRoute を辿る
+    describe('非parallel', () => {
+      test('0:第二引数が空のとき', async () => {
+        const route = objectifyRouteString(['a', 'aa', 'aaa'])
+        expect(traverseStateRouteMatch(route, [])).toEqual({
+          isExhausted: true,
+          endIdx: 0,
+          remaining: [route, 0],
+        })
       })
 
-      test('2.1: 初手でマッチしなければ isExhausted: false, endIdx: 0', async () => {
-        expect(traverseStateTreeMatch(
-          ['a', 'ab'],
-          { x: {} },
-        )).toEqual(
-          {
-            endIdx: 0,
-            remaining: { x: {} },
-            isExhausted: false
-          }
-        )
+      test('0:完全一致', async () => {
+        const route = objectifyRouteString(['a', 'aa', 'aaa'])
+        expect(traverseStateRouteMatch(route, ['a', 'aa', 'aaa'])).toEqual({
+          isExhausted: true,
+          endIdx: 3,
+          remaining: [route, 3],
+        })
+      })
+      test('0:routeに余りあり', async () => {
+        const route = objectifyRouteString(['a', 'aa', 'aaa'])
+        expect(traverseStateRouteMatch(route, ['a', 'aa'])).toEqual({
+          isExhausted: true,
+          endIdx: 2,
+          remaining: [route, 2],
+        })
       })
 
-      test('2.2: 途中でマッチしなければ isExhausted: false, endIdx にはマッチしなかった箇所が入る', async () => {
-        expect(traverseStateTreeMatch(
-          ['a', 'ab'],
-          { a: { x: {} } },
-        )).toEqual(
-          {
-            endIdx: 1,
-            remaining: { x: {} },
-            isExhausted: false
-          }
-        )
+      test('0:第二引数が超過', async () => {
+        const route = objectifyRouteString(['a', 'aa'])
+        expect(traverseStateRouteMatch(route, ['a', 'aa', 'aaa', 'aaaa'])).toEqual({
+          isExhausted: false,
+          endIdx: 2, // idx 2 以降が不一致
+          remaining: [route, 2], // idx 2 以降が
+        })
       })
 
-      test('3: ちょうど第一引数を消費しつくしたときに終わると endIdx は 第一引数の長さに、 remaining は空になる', async () => {
-        expect(traverseStateTreeMatch(
-          ['a', 'ab'],
-          { a: { aa: {}, ab: {} } },
-        )).toEqual(
-          {
-            endIdx: 2,
-            remaining: {},
-            isExhausted: true,
-          }
-        )
+      test('0:不一致', async () => {
+        const route = objectifyRouteString(['a', 'aa'])
+        expect(traverseStateRouteMatch(route, ['a', 'b', 'aaa', 'aaaa'])).toEqual({
+          isExhausted: false,
+          endIdx: 1,
+          remaining: [route, 1],
+        })
       })
-
-      test('4: 第一引数を消費しつくしても 第二引数 が残る場合、 remaining にそれが入る', async () => {
-        expect(traverseStateTreeMatch(
-          ['a', 'ab'],
-          { a: { aa: {}, ab: { aba: { abaa: {} }, abb: {} } } },
-        )).toEqual(
-          {
-            endIdx: 2,
-            remaining: { aba: { abaa: {} }, abb: {} },
-            isExhausted: true,
-          }
-        )
-      })
-
     })
 
-  })
+    describe('parallel', () => {
+      test('1:', async () => {
+        const route = objectifyRouteString([
+          'a',
+          { parallel: 'aa', regions: { aa1: ['aa1a', 'aa1ab'], aa2: ['aa2a'], aa3: [] } },
+        ])
+        expect(traverseStateRouteMatch(route, ['a'])).toEqual({
+          isExhausted: true,
+          endIdx: 1,
+          remaining: [route, 1],
+        })
+      })
 
+      test('2:', async () => {
+        const route = objectifyRouteString([
+          'a',
+          { parallel: 'aa', regions: { aa1: ['aa1a', 'aa1ab'], aa2: ['aa2a'], aa3: [] } },
+        ])
+        expect(traverseStateRouteMatch(route, ['a', 'aa'])).toEqual({
+          isExhausted: true,
+          endIdx: 2,
+          remaining: [route, 1, true],
+        })
+      })
+
+      test('2.2:parallel でつまずいたら remaining がない', async () => {
+        const route = objectifyRouteString([
+          'a',
+          { parallel: 'aa', regions: { aa1: ['aa1a', 'aa1ab'], aa2: ['aa2a'], aa3: [] } },
+        ])
+        expect(traverseStateRouteMatch(route, ['a', 'x'])).toEqual({
+          isExhausted: false,
+          endIdx: 1,
+        })
+      })
+
+      test('3:', async () => {
+        const route = objectifyRouteString([
+          'a',
+          { parallel: 'aa', regions: { aa1: ['aa1a', 'aa1ab'], aa2: ['aa2a'], aa3: [] } },
+        ])
+        expect(traverseStateRouteMatch(route, ['a', 'aa', 'aa1'])).toEqual({
+          isExhausted: true,
+          endIdx: 3,
+          // @ts-expect-error
+          remaining: [route[1]!.regions.aa1, 0],
+        })
+      })
+
+      test('3.2:parallelでつまずいたら remaining はない', async () => {
+        const route = objectifyRouteString([
+          'a',
+          { parallel: 'aa', regions: { aa1: ['aa1a', 'aa1ab'], aa2: ['aa2a'], aa3: [] } },
+        ])
+        expect(traverseStateRouteMatch(route, ['a', 'aa', 'x'])).toEqual({
+          isExhausted: false,
+          endIdx: 2,
+        })
+      })
+
+      test('4:', async () => {
+        const route = objectifyRouteString([
+          'a',
+          { parallel: 'aa', regions: { aa1: ['aa1a', 'aa1ab'], aa2: ['aa2a'], aa3: [] } },
+        ])
+        expect(traverseStateRouteMatch(route, ['a', 'aa', 'aa1', 'aa1a'])).toEqual({
+          isExhausted: true,
+          endIdx: 4,
+          // @ts-expect-error
+          remaining: [route[1]!.regions.aa1, 1],
+        })
+      })
+
+      test('4.2:', async () => {
+        const route = objectifyRouteString([
+          'a',
+          { parallel: 'aa', regions: { aa1: ['aa1a', 'aa1ab'], aa2: ['aa2a'], aa3: [] } },
+        ])
+        expect(traverseStateRouteMatch(route, ['a', 'aa', 'aa1', 'x'])).toEqual({
+          isExhausted: false,
+          endIdx: 3,
+          // @ts-expect-error
+          remaining: [route[1]!.regions.aa1, 0],
+        })
+      })
+
+      test('4.3:超過', async () => {
+        const route = objectifyRouteString([
+          'a',
+          { parallel: 'aa', regions: { aa1: ['aa1a', 'aa1ab'], aa2: ['aa2a'], aa3: [] } },
+        ])
+        expect(traverseStateRouteMatch(route, ['a', 'aa', 'aa1', 'aa1a', 'aa1ab', 'aa1abb'])).toEqual({
+          isExhausted: false,
+          endIdx: 5,
+          // @ts-expect-error
+          remaining: [route[1]!.regions.aa1, 2],
+        })
+      })
+
+      test('5:', async () => {
+        const route = objectifyRouteString([
+          'a',
+          { parallel: 'aa', regions: { aa1: ['aa1a', 'aa1ab'], aa2: ['aa2a'], aa3: [] } },
+        ])
+        expect(traverseStateRouteMatch(route, ['a', 'aa', 'aa3'])).toEqual({
+          isExhausted: true,
+          endIdx: 3,
+          // @ts-expect-error
+          remaining: [route[1]!.regions.aa3, 0],
+        })
+      })
+    })
+  })
 })

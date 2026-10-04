@@ -24,7 +24,7 @@ const o_InternalEvent = type({
 const NStateItemDef = type({
   '+': 'reject',
   pPath: 'string',
-  final: 'boolean',
+  final: AnyFn.or('boolean'),
   //tags: 'Set',
   entryHooks: NormalizedActions.or('null'),
   exitHooks: NormalizedActions.or('null'),
@@ -37,7 +37,7 @@ export const SubStNormalizedDefinition = type([
   {
     'dType?': '"normal"',
     initial: 'string | undefined',
-    states: {
+    stateOf: {
       '[string]': {
         def: NStateItemDef,
         sub: 'null | this',
@@ -46,8 +46,8 @@ export const SubStNormalizedDefinition = type([
   },
   '|',
   {
-    dType: '"parallel"',
-    states: {
+    dType: '"regions"',
+    stateOf: {
       '[string]': {
         def: NStateItemDef,
         sub: 'null | this',

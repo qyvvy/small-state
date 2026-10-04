@@ -8,11 +8,11 @@ import * as ark_stdef from './arktype/ark_stdef'
 import type {
   ActionFnParams,
   BuiltinEType,
+  ChildDoneEType,
+  ChildDoneEventBody,
   EmittedEvent,
   EventBody,
-  ExtractEvent,
   FnBaseParams,
-  GlobalStDefItem,
   Machine,
   MachineConfig,
   MContext,
@@ -23,15 +23,9 @@ import type {
   ParallelNormalizedDefinition,
   ParamsInput,
   StateName,
+  TopLvStDefItem,
 } from './m.types'
-import {
-  EntrySymbol,
-  ExitSymbol,
-  InvokeSymbol,
-  MachineSymbol,
-  ParallelSymbol,
-  SubStatesSymbol,
-} from './m.types'
+import { EntrySymbol, ExitSymbol, InvokeSymbol, MachineSymbol, ParallelSymbol, SubStatesSymbol } from './m.types'
 
 type X_HiddenImpl = any & { __brand: 'HiddenImpl' }
 type X_DefTypeRefluxer<
@@ -96,8 +90,8 @@ type Action<
   | Values<{ [K in keyof A & string as unknown extends A[K] ? never : K]: { [K2 in K]: ParamsInput<A[K], C, Ex, I> } }> // { [actionName: string]: Params }
   | ((arg: ActionFnParams<C, Ex, I, EM, G, A>[0]) => unknown)
 
-type StDefMetaInfo = {
-  isFinal?: boolean
+type StDefMetaInfo<C extends MContext, E extends EventBody, I> = {
+  final?: boolean | ((args: FnBaseParams<C, E, I>[0]) => unknown)
 }
 
 type StDefCoreItem<
@@ -108,7 +102,7 @@ type StDefCoreItem<
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
 > =
-  | StDefMetaInfo
+  | StDefMetaInfo<C, E, I>
   | readonly [E['type'] | BuiltinEType, X_DefTypeRefluxer<C, E, I, EM, G, A>, X_HiddenImpl] // on
   | readonly [typeof EntrySymbol, X_DefTypeRefluxer<C, E, I, EM, G, A>, null, X_HiddenImpl] // entryHook
   | readonly [typeof ExitSymbol, X_DefTypeRefluxer<C, E, I, EM, G, A>, null, X_HiddenImpl] // exitHook
@@ -127,13 +121,6 @@ type StateDefinition<
   | readonly [typeof InvokeSymbol, X_DefTypeRefluxer<C, E, I, EM, G, A, never, S>, null, unknown, any, any] // invoke
 >
 
-function entryHook<
-  C extends MContext, E extends EventBody, I, EM extends EmittedEvent, const G extends Record<string, Placeholder>, const A extends Record<string, Placeholder>
->(...actions: Array<
-  | Expand<X_ImplKeys<A>>
-  | ((arg: ActionFnParams<C, E, I, EM, G, A>[0]) => unknown)
-  | Values<{ [K in keyof A & string as unknown extends A[K] ? never : K]: { [K2 in K]: ParamsInput<A[K], C, E, I> } }>
->): readonly [typeof EntrySymbol, X_DefTypeRefluxer<C, E, I, EM, G, A, ":always:" | ":childDone:", Record<string, (input: any) => unknown>, unknown>, null, Action<C, E, I, EM, G, A>[]]
 function entryHook<
   C extends MContext,
   E extends EventBody,
@@ -155,6 +142,13 @@ function exitHook<
 >(...actions: Array<Action<C, E, I, EM, G, A>>) {
   return [ExitSymbol, (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A>, null, actions] as const // StDefItems
 }
+
+type O_ExtractEvent<E extends EventBody, Et extends E['type']> =
+  Et extends ChildDoneEType ? Expand<ChildDoneEventBody>
+  : Et extends BuiltinEType ? E
+  : E extends { type: Et } ? E
+  : Et extends E['type'] ? E
+  : never
 
 type O_Transition<
   C extends MContext,
@@ -178,7 +172,7 @@ function on<
   const A extends Record<string, Placeholder>,
   Et extends [E] extends [never] ? string : E['type'] | Eb | never,
   Eb extends BuiltinEType = BuiltinEType,
->(eventType: Et, config: OneOrMany<Expand<O_Transition<C, ExtractEvent<E, Et>, I, EM, G, A>>>) {
+>(eventType: Et, config: OneOrMany<Expand<O_Transition<C, O_ExtractEvent<E, Et>, I, EM, G, A>>>) {
   return [eventType, (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A, Eb>, config as X_HiddenImpl] as const // StDefCoreItem, InvocationCleanupEvents
 }
 
@@ -197,7 +191,7 @@ function subStates<
     (() => SubStatesSymbol) as X_DefTypeRefluxer<C, E, I, EM, G, A, BuiltinEType, S, typeof SubStatesSymbol>,
     transformNormalizedDefinition(stateDefinition, initialState) as {
       initial: [Initial] extends [never] ? undefined : Initial
-      states: {
+      stateOf: {
         [K in keyof D]: {
           def: NStateItemDef<X_ExtractEType<D[K]>>
           sub: X_ExtractSubStDefinition<D[K]>
@@ -235,13 +229,13 @@ function parallel<
     transformParallelNormalizedDefinition<C, E, I, EM, G, A, S>()<typeof parallelDefinition>(
       parallelDefinition,
     ) as unknown as {
-      dType: 'parallel'
-      states: {
+      dType: 'regions'
+      stateOf: {
         [K in keyof PD]: {
           def: NStateItemDef<O_ExtractRegionEType<PD[K]>>
           sub: {
             initial: string | undefined
-            states: {
+            stateOf: {
               [L in keyof O_InnerDict<PD[K]>]: {
                 def: NStateItemDef<X_ExtractEType<O_InnerDict<PD[K]>[L]>>
                 sub: X_ExtractSubStDefinition<O_InnerDict<PD[K]>[L]>
@@ -334,21 +328,13 @@ function x_parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateN
     return { def, sub }
   }
 
-  const getPath = () => `${def.pPath}${ST_DELIM}${stateName}`
+  const _getPath = () => `${def.pPath}${ST_DELIM}${stateName}`
   const seenInvocationId = new Set<string>()
   for (const [i, item] of items.entries()) {
     if (!Array.isArray(item)) {
-      //if ('tags' in item) {
-      //  def.tags = new Set(item.tags)
-      //}
-      //if ('entryHook' in item) {
-      //  def.entryHook = ensureArray(item.entryHook!)
-      //}
-      //if ('exitHook' in item) {
-      //  def.exitHook = ensureArray(item.exitHook!)
-      //}
-      if ('isFinal' in item) {
-        def.final = !!item.isFinal
+      if ('final' in item) {
+        const { final } = item
+        def.final = typeof final === 'function' ? final : !!final
       }
       continue
     }
@@ -375,7 +361,7 @@ function x_parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateN
             break
           case ':childDone:':
             def.internalEvents[':childDone:'] = {
-              cond: ({ path }) => path === getPath(),
+              cond: ({ path }) => path === _getPath(),
               transitions: nTransitions,
             }
             break
@@ -394,7 +380,6 @@ function x_parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateN
               throw new Error(`createMachine: Duplicate invocation id: "${ivkId}", at state:"${stateName}"[${i}]`)
             }
             seenInvocationId.add(ivkId)
-            //const nInvocation: NormalizedInvocation = { ...item[3], src: item[4] }
             def.invocations.push({ id: ivkId, ...rest, src: item[4] })
 
             const { internalEvents } = def
@@ -416,10 +401,8 @@ function x_parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateN
                   `createMachine: on(eventType, config): The 'config' argument is required, at state:"${stateName}"[${i}] > invoke events[${j}] event:"${ivkEType}"`,
                 )
               }
-              //def.internalEvents[] = o_normalizeTransitions(mid)
-              //nInvocation[ivEType] = o_normalizeTransitions(mid)
               internalEvents[internalEType] = {
-                cond: ({ path }) => path === getPath(),
+                cond: ({ path }) => path === _getPath(),
                 transitions: o_normalizeTransitions(mid),
               }
             }
@@ -443,7 +426,7 @@ function x_parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateN
         if (sub) {
           throw new Error(
             `createMachine: Duplicated subStates: at "${stateName}"[${i}] { ${Object.keys(
-              'states' in subStDict ? subStDict.states : {},
+              'stateOf' in subStDict ? subStDict.stateOf : {},
             )
               .map((el) => `${el}:...`)
               .join(', ')} }`,
@@ -495,13 +478,16 @@ function transformNormalizedDefinition<
     !firstState
       ? undefined
       : initialState &&
-        assertOrThrow(Object.hasOwn(stateDefOf, initialState), `createMachine: Invalid initialState: "${initialState}"`)
+        assertOrThrow(
+          Object.hasOwn(stateDefOf, initialState),
+          `createMachine: Invalid initialState: "${initialState}"`,
+        )
         ? initialState
         : firstState
   ) as Initial extends string ? Initial : string
   return {
     initial,
-    states: o_normalizeStates(stateDefOf),
+    stateOf: o_normalizeStates(stateDefOf),
   }
 }
 
@@ -523,10 +509,12 @@ function transformParallelNormalizedDefinition<
   >(
     parallelDefinition: PD,
   ) => {
-    const states = Object.fromEntries(
+    const stateOf = Object.fromEntries(
       Object.entries(parallelDefinition).map(([regionName, rawDefinition]) => {
         if (regionName.includes(ST_DELIM)) {
-          throw new Error(`createMachine: Parallel region state names cannot contain the character "${ST_DELIM}": "${regionName}"`)
+          throw new Error(
+            `createMachine: Parallel region state names cannot contain the character "${ST_DELIM}": "${regionName}"`,
+          )
         }
         const len = rawDefinition.length
         const leafDefOf = (rawDefinition[len - 1] || {}) as Record<string, StateDefinition<C, E, I, EM, G, A, S>>
@@ -544,8 +532,8 @@ function transformParallelNormalizedDefinition<
     )
 
     return {
-      dType: 'parallel',
-      states,
+      dType: 'regions',
+      stateOf,
     }
   }
 }
@@ -553,23 +541,23 @@ function transformParallelNormalizedDefinition<
 // ===
 
 function o_setPPathAndAddCatalog(
-  nStItemRecord: NormalizedDefinition['states'] | ParallelNormalizedDefinition['states'],
+  nStItemRecord: NormalizedDefinition['stateOf'] | ParallelNormalizedDefinition['stateOf'],
   parent: string,
   addToCatalog: (stPath: string, state: NormalizedStateItemBoth) => unknown,
   isRegion: boolean,
   addRegionPath: (regionPath: string) => unknown,
 ) {
   for (const [key, nState] of Object.entries(nStItemRecord)) {
-    nState.def.pPath = parent
+    const { def, sub } = nState
+    def.pPath = parent
     const stPath = `${parent}${ST_DELIM}${key}`
     addToCatalog(stPath, nState)
     if (isRegion) {
       addRegionPath(stPath)
     }
-    const { sub } = nState
     if (sub) {
-      const isParallel = 'dType' in sub && sub.dType === 'parallel'
-      o_setPPathAndAddCatalog(sub.states, stPath, addToCatalog, isParallel, addRegionPath)
+      const isParallel = 'dType' in sub && sub.dType === 'regions'
+      o_setPPathAndAddCatalog(sub.stateOf, stPath, addToCatalog, isParallel, addRegionPath)
     }
   }
 }
@@ -643,7 +631,7 @@ function o_validateTransitionAndSetFullTo(stateCatalog: Map<string, NormalizedSt
       _validateTransitionAndSetFullTo(transitions, eType)
     })
     Object.entries(internalEvents).forEach(([eType, internalEvent]) =>
-      _validateTransitionAndSetFullTo(internalEvent!.transitions, eType)
+      _validateTransitionAndSetFullTo(internalEvent!.transitions, eType),
     )
   })
 }
@@ -701,13 +689,13 @@ function getDefinitionAndCatalog<
     }
   }
 
-  const { initial, states } = transformNormalizedDefinition(stateDefDict, config.initialState)
+  const { initial, stateOf } = transformNormalizedDefinition(stateDefDict, config.initialState)
 
   // Setup stateCatalog and regionPaths
   const stateCatalog = new Map<string, NormalizedStateItemBoth>()
   const regionPaths: string[] = []
   o_setPPathAndAddCatalog(
-    states,
+    stateOf,
     '',
     (stPath: string, state: NormalizedStateItemBoth) => stateCatalog.set(stPath, state),
     false,
@@ -721,20 +709,19 @@ function getDefinitionAndCatalog<
     def: { events, internalEvents },
   } = x_parseStDefItems(globalEvents || [], '(root)')
   {
-    const _validateTransitionAndSetFullTo =
-      x_readyToValidateTransitionAndSetFullTo(stateCatalog, '', '', regionPaths)
+    const _validateTransitionAndSetFullTo = x_readyToValidateTransitionAndSetFullTo(stateCatalog, '', '', regionPaths)
     Object.entries(events).forEach(([eType, transitions]) => {
       if (!transitions) return
       _validateTransitionAndSetFullTo(transitions, eType)
     })
     Object.entries(internalEvents).forEach(([eType, internalEvent]) =>
-      _validateTransitionAndSetFullTo(internalEvent!.transitions, eType)
+      _validateTransitionAndSetFullTo(internalEvent!.transitions, eType),
     )
   }
 
   return {
-    definition: { initial, states },
-    globalDefItem: { events, internalEvents },
+    definition: { initial, stateOf },
+    topLvDefItem: { events, internalEvents },
     stateCatalog,
     regionPaths,
   }
@@ -757,7 +744,7 @@ export function createMachine<
   ) => readonly [X_GlobalEvents<C, E, I, EM, G, A>, D] | readonly [D] | D,
   //defineStates: ( define: Expand<T_DefineStatesParam>) => D,
 ) {
-  const { definition, globalDefItem, stateCatalog, regionPaths } = getDefinitionAndCatalog<C, E, I, EM, O, S, D, G, A>(
+  const { definition, topLvDefItem, stateCatalog, regionPaths } = getDefinitionAndCatalog<C, E, I, EM, O, S, D, G, A>(
     config,
     defineStates,
   )
@@ -773,7 +760,7 @@ export function createMachine<
     actions: actions || ({} as any),
     services: services || ({} as any),
     definition,
-    globalDefItem: globalDefItem as GlobalStDefItem<E['type']>,
+    topLvDefItem: topLvDefItem as TopLvStDefItem<E['type']>,
     stateCatalog,
     regionPaths,
   }

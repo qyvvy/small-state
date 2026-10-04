@@ -1,26 +1,17 @@
 import type { AnyFn, Duplicate, Expand, Placeholder, Values } from '../shared/general.types'
 
-export type ExtractEvent<E extends EventBody, Et extends E['type']> =
-  Et extends BuiltinEType ? E : E extends { type: Et } ? E : Et extends E['type'] ? E : never
-
 
 export const EntrySymbol: unique symbol = Symbol('Entry')
 export const ExitSymbol: unique symbol = Symbol('Exit')
 export const SubStatesSymbol: unique symbol = Symbol('SubStates')
 export const ParallelSymbol: unique symbol = Symbol('Parallel')
 export const InvokeSymbol: unique symbol = Symbol('Invoke')
-export const InternalEventSymbol: unique symbol = Symbol('InternalEvent')
 
 
-//export const BUILTIN_ETYPES = [':ctxChanged:', ':childDone:'] as const
-export const BUILTIN_ETYPES = [':always:', ':childDone:'] as const
-const BuiltinETypeSet = new Set<string>(BUILTIN_ETYPES)
-export type BuiltinEType = (typeof BUILTIN_ETYPES)[number]
-export const isBuiltinEType = (v: string): v is BuiltinEType =>
-  BuiltinETypeSet.has(v)
+export type ChildDoneEventBody = { type: ':childDone:', output: unknown }
+export type ChildDoneEType = ChildDoneEventBody['type']
+export type BuiltinEType = ':always:' | ChildDoneEType
 
-//export const INTERNAL_ETYPES = [':always:', ':childDone:', 'done', 'error'] as const
-//export type InternalEType = (typeof INTERNAL_ETYPES)[number]
 export type InternalEType = BuiltinEType | `${string}/done` | `${string}/error`
 export type InternalEventBody = { type: InternalEType;[key: string]: any }
 
@@ -99,8 +90,6 @@ export type NormalizedInvocation = {
   id: string
   input?: AnyFn
   src: AnyFn | string
-  //done?: NormalizedTransition[]
-  //error?: NormalizedTransition[]
 }
 
 export type InternalEPayload = { path: string }
@@ -111,7 +100,7 @@ type InternalEvent = {
 
 export type NStateItemDef<Et extends string> = {
   pPath: string
-  final: boolean
+  final: boolean | AnyFn
   //tags: Set<string>
   entryHooks: NormalizedAction[] | null
   exitHooks: NormalizedAction[] | null
@@ -135,11 +124,11 @@ export type NormalizedStateItemBoth = NormalizedStateItem | ParallelNormalizedSt
 export type NormalizedDefinition = {
   dType?: 'normal'
   initial: string | undefined,
-  states: Record<string, NormalizedStateItem>
+  stateOf: Record<string, NormalizedStateItem>
 }
 export type ParallelNormalizedDefinition = {
-  dType: 'parallel'
-  states: Record<string, ParallelNormalizedStateItem>
+  dType: 'regions'
+  stateOf: Record<string, ParallelNormalizedStateItem>
 }
 
 export type ParamsInput<P, C extends MContext, Ex extends EventBody, I> =
@@ -184,7 +173,7 @@ export type MachineConfig<
   services?: S
 }
 
-export type GlobalStDefItem<Et extends string> = {
+export type TopLvStDefItem<Et extends string> = {
   events: { [K in Et]?: NormalizedTransition[] }
   internalEvents: { [K in InternalEType]?: InternalEvent }
 }
@@ -211,7 +200,7 @@ export type Machine<
   }
   services: S
   definition: ND
-  globalDefItem: GlobalStDefItem<E['type']>
+  topLvDefItem: TopLvStDefItem<E['type']>
   stateCatalog: Map<string, NormalizedStateItemBoth>
   regionPaths: string[]
 }

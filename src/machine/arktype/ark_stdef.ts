@@ -21,7 +21,7 @@ const o_StDefMetaInfo = type({
   //'tags?': '(string > 0)[]',
   //'entryHook?': ActionFuncs,
   //'exitHook?': ActionFuncs,
-  'isFinal?': 'boolean',
+  'final?': AnyFn.or('boolean'),
 })
 const o_SubStatesNormalized = type([AnyFn, SubStNormalizedDefinition]).readonly() // subStates|parallel
 const o_Invocation = type([
