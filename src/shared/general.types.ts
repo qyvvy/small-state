@@ -15,6 +15,7 @@ export type Mutable<T> = { -readonly [K in keyof T]: T[K] }
 export type KeysWithoutUnknown<T extends object> = {
   [K in keyof T]: unknown extends T[K] ? never : K
 }[keyof T]
+export type Merge<A, B> = Omit<A, keyof B> & B
 
 type Ary2Dict<T extends readonly Record<PropertyKey, any>[], K extends PropertyKey> = Readonly<{
   [P in T[number]as P[K]]: P

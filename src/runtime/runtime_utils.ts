@@ -13,7 +13,6 @@ import type { AnyFn, RecursiveRecord } from '../shared/general.types'
 import { isPlainObject } from '../shared/utils'
 import type { StateRoute } from './r.types'
 
-//import type { EnqueueActions, CheckFn, EnqueueFn } from '../machine/createMachine-enqueue'
 
 type MachineGuardFn<C extends MContext, E extends EventBody, I> = (...args: FnBaseParams<C, E, I>) => boolean
 
@@ -101,7 +100,7 @@ export const runtimeUtils = {
 
 export function readyToEvalGuard<C extends MContext, Ex extends EventBody, I>(
   fnBaseParam: FnBaseParams<C, Ex, I>[0],
-  machineGuards: Machine<any, any, any, any, any, any, any, any, any>['guards'],
+  machineGuards: Machine<any, any, any, any, any, any, any, any, any>['internal']['guards'],
 ) {
   return (guard: NormalizedTransition['guards'][number]): boolean => {
     const [fn, params] = resolveGuardElement(guard, machineGuards)

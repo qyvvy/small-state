@@ -17,16 +17,15 @@ import { initRuntime, macrostep } from './runtime_step'
 import { readyAction } from './runtime_step.core'
 import { runtimeUtils } from './runtime_utils'
 
-export type RuntimeStatus = 'stopped' | 'active' | 'completed' | 'error'
+export type RuntimeStatus = 'stopped' | 'active' | 'done' | 'error'
+
 type Observer<C extends MContext, O> = (current: Snapshot<C, O>, prev: Snapshot<C, O>) => void
 type Snapshot<C extends MContext, O> = {
-  //parent: string,
   states: string[]
   stateValue: string | string[]
   context: X_RemovePrivateKeys<C>
   runtimeStatus: RuntimeStatus
   output: O | undefined
-  //children
 }
 type RuntimeOption<I> = {
   id?: string
@@ -37,7 +36,6 @@ type X_RemovePrivateKeys<T extends Record<string, unknown>> = {
   [K in keyof T as K extends `_${string}` ? never : K]: T[K]
 }
 
-// robot3: interpret(Machine, onChange, initialContext)=> {machine: M, context: M['context'], onChange: (s:Service)=>void, send: (e:SendEvent)=>void, child?: Service}
 export function createRuntime<
   C extends MContext,
   E extends EventBody,
@@ -66,6 +64,7 @@ class Runtime<
 > {
   readonly id!: string
   readonly machine!: Machine<C, E, I, EM, O, G, A, S, ND>
+  readonly #machineInternal!: Machine<C, E, I, EM, O, G, A, S, ND>['internal']
   readonly #input!: I
   #realContext!: C
   #crrStates: StateRoute = []
@@ -93,9 +92,10 @@ class Runtime<
       enumerable: true,
     })
     defineFixedProperty(this, 'machine', machine, { enumerable: true })
+    this.#machineInternal = machine.internal
     this.#input = input?.() as I
 
-    const { initContext } = machine
+    const { initContext } = machine.internal
     const context = initContext ? initContext(this.#input) : (undefined as any as C)
     this.#buildAndSetSnapshot(context, true, 'stopped')()
   }
@@ -114,7 +114,7 @@ class Runtime<
       this.#input,
       this.#emit,
       this.#crrStates,
-      this.machine,
+      this.#machineInternal,
       this.#enqueueEvent,
     )
 
@@ -148,7 +148,7 @@ class Runtime<
   }
 
   #processSentEvent<Ex extends E | InternalEventBody>(event: Ex, internalEPayload?: InternalEPayload) {
-    const { guards, actions, topLvDefItem } = this.machine
+    const { guards, actions, topLvDefItem } = this.#machineInternal
     const actionRunner = readyAction<C, E, I, EM, G, A, Ex>(
       this.#realContext,
       event,
@@ -163,7 +163,7 @@ class Runtime<
       internalEPayload,
       this.#crrStates,
       actionRunner,
-      this.machine,
+      this.#machineInternal,
       this.#enqueueEvent,
       topLvDefItem,
     )
@@ -213,7 +213,7 @@ class Runtime<
       if (!(hasTransitioned || contextUpdated || runtimeStatus)) {
         return
       }
-      const { stateCatalog, output } = this.machine
+      const { stateCatalog, output } = this.machine.internal
       const isCompleted = !states.length ? false : states.every((stPath) => stateCatalog.get(stPath)?.def.final)
 
       this.#snapshot = {
@@ -222,7 +222,7 @@ class Runtime<
           return states.length === 1 ? states[0]! : states
         },
         context,
-        runtimeStatus: isCompleted ? 'completed' : runtimeStatus || oldSnapshot.runtimeStatus,
+        runtimeStatus: isCompleted ? 'done' : runtimeStatus || oldSnapshot.runtimeStatus,
         output: !(isCompleted && output)
           ? undefined
           : output(runtimeUtils.makeFnBaseParam(realContext, event, this.#input)),
@@ -247,6 +247,7 @@ class Runtime<
     this.#emittedListeners.clear()
   }
 }
+
 
 function makeStateList(stateRoute: StateRoute, idx: number, parent: string) {
   if (idx >= stateRoute.length) return [parent]

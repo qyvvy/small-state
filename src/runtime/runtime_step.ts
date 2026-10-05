@@ -66,11 +66,11 @@ export function initRuntime<
   input: I,
   emit: EmitFn<EM>,
   crrStates: StateRoute,
-  machine: Machine<C, E, I, EM, any, G, A, any, ND>,
+  machineInternal: Machine<C, E, I, EM, any, G, A, any, ND>['internal'],
   enqueueEvent: EnqueueEventFn<E>,
   event: E = { type: ':init:' } as E,
 ) {
-  const { definition, guards, actions, topLvDefItem } = machine
+  const { definition, guards, actions, topLvDefItem } = machineInternal
   const { initial } = definition
 
   const actionRunner = readyAction<C, E, I, EM, G, A>(realContext, event, input, guards, actions, emit)
@@ -81,7 +81,7 @@ export function initRuntime<
       tIndex: -1, // dummy
     },
   ]
-  const hasTransitioned = runMicrosteps(tExecs, crrStates, actionRunner, machine, enqueueEvent, topLvDefItem)
+  const hasTransitioned = runMicrosteps(tExecs, crrStates, actionRunner, machineInternal, enqueueEvent, topLvDefItem)
 
   {
     const { context } = actionRunner.getResult()
@@ -103,11 +103,11 @@ export function macrostep<
   internalEPayload: InternalEPayload | undefined,
   crrStates: StateRoute,
   actionRunner: ReturnType<typeof readyAction<C, E, I, EM, G, A, Ex>>,
-  machine: Machine<C, E, I, EM, any, G, A, any, ND>,
+  machineInternal: Machine<C, E, I, EM, any, G, A, any, ND>['internal'],
   enqueueEvent: EnqueueEventFn<E>,
   topLvDefItem: TopLvStDefItem<E['type']>,
 ) {
-  const { guards, stateCatalog } = machine
+  const { guards, stateCatalog } = machineInternal
 
   const tExecs = deriveEventTransition(
     eType,
@@ -121,7 +121,7 @@ export function macrostep<
 
   execTExecActions(tExecs, actionRunner, 'transition')
 
-  const hasTransitioned = runMicrosteps(tExecs, crrStates, actionRunner, machine, enqueueEvent, topLvDefItem)
+  const hasTransitioned = runMicrosteps(tExecs, crrStates, actionRunner, machineInternal, enqueueEvent, topLvDefItem)
 
   {
     const { context } = actionRunner.getResult()
@@ -142,15 +142,15 @@ function runMicrosteps<
   tExecs: TransitionExec[],
   crrStates: StateRoute,
   actionRunner: ReturnType<typeof readyAction<C, E, I, EM, G, A, Ex>>,
-  machine: Machine<C, E, I, EM, any, G, A, any, ND>,
+  machineInternal: Machine<C, E, I, EM, any, G, A, any, ND>['internal'],
   enqueueEvent: EnqueueEventFn<E>,
   topLvDefItem: TopLvStDefItem<E['type']>,
 ) {
   const internalQueue: Array<[EventBody, InternalEPayload]> = []
 
-  let hasTransitioned = runExitAndEntryThenAlways(tExecs, crrStates, actionRunner, machine, enqueueEvent, internalQueue)
+  let hasTransitioned = runExitAndEntryThenAlways(tExecs, crrStates, actionRunner, machineInternal, enqueueEvent, internalQueue)
 
-  const { guards, stateCatalog } = machine
+  const { guards, stateCatalog } = machineInternal
   const { makeFnBaseParam } = actionRunner
   while (internalQueue.length) {
     const [event, payload] = internalQueue.shift()!
@@ -167,7 +167,7 @@ function runMicrosteps<
     execTExecActions(internalTExecs, actionRunner, event.type, event)
 
     hasTransitioned =
-      runExitAndEntryThenAlways(internalTExecs, crrStates, actionRunner, machine, enqueueEvent, internalQueue) || hasTransitioned
+      runExitAndEntryThenAlways(internalTExecs, crrStates, actionRunner, machineInternal, enqueueEvent, internalQueue) || hasTransitioned
   }
 
   return hasTransitioned
@@ -186,7 +186,7 @@ function runExitAndEntryThenAlways<
   tExecs: TransitionExec[],
   crrStates: StateRoute,
   actionRunner: ReturnType<typeof readyAction<C, E, I, EM, G, A, Ex>>,
-  machine: Machine<C, E, I, EM, any, G, A, any, ND>,
+  machineInternal: Machine<C, E, I, EM, any, G, A, any, ND>['internal'],
   enqueueEvent: EnqueueEventFn<E>,
   internalQueue: Array<[EventBody, InternalEPayload]>,
 ) {
@@ -194,7 +194,7 @@ function runExitAndEntryThenAlways<
     tExecs,
     crrStates,
     actionRunner,
-    machine,
+    machineInternal,
     enqueueEvent,
     internalQueue,
   )
@@ -202,7 +202,7 @@ function runExitAndEntryThenAlways<
   let i = 0
   while (alwaysTExecs.length) {
     let tmp: boolean
-      ;[alwaysTExecs, tmp] = exitAndEntry(alwaysTExecs, crrStates, actionRunner, machine, enqueueEvent, internalQueue)
+      ;[alwaysTExecs, tmp] = exitAndEntry(alwaysTExecs, crrStates, actionRunner, machineInternal, enqueueEvent, internalQueue)
     hasTransitioned ||= tmp
     if (++i > MICROSTEP_LOOP_LIMIT) {
       throw new Error(`Maximum number of microsteps exceeded`)
@@ -224,7 +224,7 @@ function exitAndEntry<
   tExecs: TransitionExec[],
   crrStates: StateRoute,
   actionRunner: ReturnType<typeof readyAction<C, E, I, EM, G, A, Ex>>,
-  { guards, services, stateCatalog, definition }: Machine<C, E, I, EM, any, G, A, any, ND>,
+  { guards, services, stateCatalog, definition }: Machine<C, E, I, EM, any, G, A, any, ND>['internal'],
   enqueueEvent: EnqueueEventFn<E>,
   internalQueue: Array<[EventBody, InternalEPayload]>,
 ): [TransitionExec[], hasTransitioned: boolean] {

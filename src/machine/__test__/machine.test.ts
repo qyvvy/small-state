@@ -1380,7 +1380,7 @@ describe('machine', () => {
               'increment',
               on('done', {
                 to: 'state2',
-                actions: ({ e, update }) => update({ count: e.data }),
+                actions: ({ e, update }) => update({ count: e.output }),
               }),
               on('error', {
                 to: 'state3',
@@ -1394,7 +1394,7 @@ describe('machine', () => {
                 to: 'state2',
                 actions: ({ e, update, c }) => {
                   update({
-                    count: e.data,
+                    count: e.output,
                   })
                 },
               }),
@@ -1415,7 +1415,7 @@ describe('machine', () => {
                   on('done', {
                     to: 'subState2',
                     actions: ({ e, update, c }) => {
-                      update({ count: e.data })
+                      update({ count: e.output })
                     },
                   }),
                   on('error', { actions: ({ e }) => e.error }),

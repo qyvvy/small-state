@@ -1,6 +1,6 @@
 import { type as arkType } from 'arktype'
 import { ST_DELIM } from '../shared/constants'
-import type { AnyFn, Expand, OneOrMany, Placeholder, Values } from '../shared/general.types'
+import type { AnyFn, Expand, Merge, OneOrMany, Placeholder, Values } from '../shared/general.types'
 import { assertOrThrow, deepFreeze, ensureArray, parentPathOf, randomString } from '../shared/utils'
 import * as ark_m_config from './arktype/ark_m_config'
 import type * as ark_normalized from './arktype/ark_normalized'
@@ -24,8 +24,10 @@ import type {
   ParamsInput,
   StateName,
   TopLvStDefItem,
+  InternalEventBody,
+  LimitedActionFnParams,
 } from './m.types'
-import { EntrySymbol, ExitSymbol, InvokeSymbol, MachineSymbol, ParallelSymbol, SubStatesSymbol } from './m.types'
+import { EntrySymbol, ExitSymbol, InvokeSymbol, ParallelSymbol, SubStatesSymbol } from './m.types'
 
 type X_HiddenImpl = any & { __brand: 'HiddenImpl' }
 type X_DefTypeRefluxer<
@@ -260,9 +262,9 @@ type InvocationCleanupEvents<
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
-  Data,
+  O,
 > = Array<
-  | readonly ['done', NoInfer<X_DefTypeRefluxer<C, { type: 'done'; data: Data }, I, EM, G, A, never>>, X_HiddenImpl] // on
+  | readonly ['done', NoInfer<X_DefTypeRefluxer<C, { type: 'done'; output: O }, I, EM, G, A, never>>, X_HiddenImpl] // on
   | readonly ['error', X_DefTypeRefluxer<C, { type: 'error'; error: Error }, I, EM, G, A, never>, X_HiddenImpl] // on
 >
 
@@ -594,8 +596,8 @@ function x_readyToValidateTransitionAndSetFullTo(
   pPath: string,
   regionPaths: string[],
 ) {
-  const regionUnder = regionPaths.find((regionPath) => pPath.startsWith(regionPath))
-  const parallelRoot = !regionUnder ? null : parentPathOf(regionUnder)
+  const ancestorRegion = regionPaths.find((regionPath) => pPath.startsWith(regionPath))
+  const parallelRoot = !ancestorRegion ? null : parentPathOf(ancestorRegion)
 
   return (transitions: NormalizedTransition[], eType: string) => {
     for (const transition of transitions) {
@@ -607,7 +609,7 @@ function x_readyToValidateTransitionAndSetFullTo(
       if (!tFullPath) {
         throw new Error(`createMachine: Invalid transition "${to}" in state "${statePath || '/'}" (on:"${eType}").`)
       }
-      if (regionUnder && !tFullPath.startsWith(regionUnder) && tFullPath.startsWith(parallelRoot!)) {
+      if (ancestorRegion && !tFullPath.startsWith(ancestorRegion) && tFullPath.startsWith(parallelRoot!)) {
         throw new Error(
           `createMachine: Transitions in a parallel state cannot target a different region: on('${eType}', ['${to}', ...]) in state "${statePath || '/'}".`,
         )
@@ -723,7 +725,7 @@ function getDefinitionAndCatalog<
     definition: { initial, stateOf },
     topLvDefItem: { events, internalEvents },
     stateCatalog,
-    regionPaths,
+    regionPaths, // マシン内では使わなくなった
   }
 }
 
@@ -744,7 +746,7 @@ export function createMachine<
   ) => readonly [X_GlobalEvents<C, E, I, EM, G, A>, D] | readonly [D] | D,
   //defineStates: ( define: Expand<T_DefineStatesParam>) => D,
 ) {
-  const { definition, topLvDefItem, stateCatalog, regionPaths } = getDefinitionAndCatalog<C, E, I, EM, O, S, D, G, A>(
+  const { definition, topLvDefItem, stateCatalog } = getDefinitionAndCatalog<C, E, I, EM, O, S, D, G, A>(
     config,
     defineStates,
   )
@@ -752,41 +754,59 @@ export function createMachine<
   const { name, initContext, output, guards, actions, services } = config
 
   const m: Machine<C, E, I, EM, O, G, A, S, typeof definition> = {
-    [MachineSymbol]: true,
     name: name || '(machine)',
-    initContext,
-    output,
-    guards: guards || ({} as any),
-    actions: actions || ({} as any),
-    services: services || ({} as any),
-    definition,
-    topLvDefItem: topLvDefItem as TopLvStDefItem<E['type']>,
-    stateCatalog,
-    regionPaths,
+    provide,
+    internal: {
+      initContext,
+      output,
+      guards: guards || ({} as any),
+      actions: actions || ({} as any),
+      services: services || ({} as any),
+      definition,
+      topLvDefItem: topLvDefItem as TopLvStDefItem<E['type']>,
+      stateCatalog,
+    }
   }
   return deepFreeze(m)
-
-  //const stateDefDict = defineStates({ on, AttachJot, subStates })
-  //const normalizedStDefs = normalizeStateDefinition<C, E, I, keyof G & string, keyof A & string>()(stateDefDict)
-  //return definition
-
-  //return new Machine<C, E, EM, I, O, G, A, S, typeof definition>(config, definition, stateCatalog)
-
-  //return new Machine(config, normalizedStateDefs)
-  //const getInput = (input: I) => input
-  //const { types, id, ...rest } = config
-
-  //const configuration = {
-  //  ...(id ? { id } : { id: makeId() }),
-  //  getInput,
-  //  stateDict,
-  //  ...rest
-  //}
 }
 
-function makeId() {
-  return `${randomString(4)}-${Date.now()}`.slice(-5)
+function provide<
+  C extends MContext,
+  const E extends EventBody,
+  const I,
+  const EM extends EmittedEvent,
+  O,
+  const G extends Record<string, Placeholder>,
+  const A extends Record<string, Placeholder>,
+  const S extends Record<string, (input: any) => unknown>,
+  ND extends NormalizedDefinition,
+  const nS extends Record<string, (input: any) => unknown>,
+  const nG extends Record<string, Placeholder> = Record<string, Placeholder>,
+  const nA extends Record<string, Placeholder> = Record<string, Placeholder>,
+>(
+  this: Machine<C, E, I, EM, any, G, A, S, ND>,
+  implementations: {
+    guards?: { [K in keyof nG]: (arg: FnBaseParams<C, E | InternalEventBody, I>[0], params: nG[K]) => boolean },
+    actions?: {
+      [K in keyof nA]: (arg: LimitedActionFnParams<C, E | InternalEventBody, I, EM>[0], params: nA[K]) => unknown
+    }
+    services?: nS
+  }
+): Readonly<Machine<C, E, I, EM, O, Merge<G, nG>, Merge<A, nA>, Merge<S, nS>, ND>> {
+  const { internal } = this
+  const { guards, actions, services } = internal
+  const newMachine = {
+    ...this,
+    internal: {
+      ...internal,
+      guards: { ...guards, ...implementations.guards },
+      actions: { ...actions, ...implementations.actions },
+      services: { ...services, ...implementations.services },
+    }
+  }
+  return deepFreeze(newMachine) as any
 }
+
 
 export const __test__ = {
   getDefinitionAndCatalog,

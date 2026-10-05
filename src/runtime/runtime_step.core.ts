@@ -272,8 +272,8 @@ export function readyAction<
   origContext: C,
   event: Ex,
   input: I,
-  machineGuards: Machine<C, E, I, any, any, any, any, any, any>['guards'],
-  machineActions: Machine<C, E, I, EM, any, any, any, any, any>['actions'],
+  machineGuards: Machine<C, E, I, any, any, any, any, any, any>['internal']['guards'],
+  machineActions: Machine<C, E, I, EM, any, any, any, any, any>['internal']['actions'],
   emit: EmitFn<EM>,
 ) {
   let context = deepFreeze(origContext)
@@ -410,7 +410,7 @@ export function readyAction<
 
 function o_readyToFindInternalEventTransition<C extends MContext, Ex extends EventBody, I>(
   fnBaseParam: FnBaseParams<C, Ex, I>[0],
-  machineGuards: Machine<any, any, any, any, any, any, any, any, any>['guards'],
+  machineGuards: Machine<any, any, any, any, any, any, any, any, any>['internal']['guards'],
   internalEPayload: InternalEPayload,
 ) {
   const _evalGuard = readyToEvalGuard(fnBaseParam, machineGuards)
@@ -433,7 +433,7 @@ function o_readyToFindInternalEventTransition<C extends MContext, Ex extends Eve
 
 function o_readyToFindTransitionByEvent<C extends MContext, Ex extends EventBody, I>(
   fnBaseParam: FnBaseParams<C, Ex, I>[0],
-  machineGuards: Machine<any, any, any, any, any, any, any, any, any>['guards'],
+  machineGuards: Machine<any, any, any, any, any, any, any, any, any>['internal']['guards'],
 ) {
   const _evalGuard = readyToEvalGuard(fnBaseParam, machineGuards)
 
@@ -455,7 +455,7 @@ export function deriveEventTransition<C extends MContext, Ex extends EventBody, 
   internalEPayload: InternalEPayload | undefined,
   fnBaseParam: FnBaseParams<C, Ex, I>[0],
   crrStates: StateRoute,
-  machineGuards: Machine<any, any, any, any, any, any, any, any, any>['guards'],
+  machineGuards: Machine<any, any, any, any, any, any, any, any, any>['internal']['guards'],
   stateCatalog: Map<string, NormalizedStateItemBoth>,
   topLvDefItem: TopLvStDefItem<string>,
 ): TransitionExec[] {
@@ -678,7 +678,7 @@ export function launchInvocations(
   path: string,
   stateRouteEl: StateRoute | StateRoute[number],
   makeFnBaseParam: () => FnBaseParams<any, any, any>[0],
-  machineServices: Machine<any, any, any, any, any, any, any, any, any>['services'],
+  machineServices: Machine<any, any, any, any, any, any, any, any, any>['internal']['services'],
   enqueueEvent: EnqueueEventFn<any>,
 ) {
   const stateRouteElRef = new WeakRef(stateRouteEl) // stateRouteEl が生存していなければ enqueueEvent しない
@@ -798,7 +798,7 @@ export function* genChildDoneEvents<C extends MContext, Ex extends EventBody, I>
 
 function o_readyToFindAlwaysTransition<C extends MContext, Ex extends EventBody, I>(
   fnBaseParam: FnBaseParams<C, Ex, I>[0],
-  machineGuards: Machine<any, any, any, any, any, any, any, any, any>['guards'],
+  machineGuards: Machine<any, any, any, any, any, any, any, any, any>['internal']['guards'],
 ) {
   const _evalGuard = readyToEvalGuard(fnBaseParam, machineGuards)
 
@@ -818,7 +818,7 @@ export function evalAlwaysEvent<C extends MContext, Ex extends EventBody, I>(
   fnBaseParam: FnBaseParams<C, Ex, I>[0],
   //crrStateTree: RecursiveRecord,
   crrStates: StateRoute,
-  machineGuards: Machine<any, any, any, any, any, any, any, any, any>['guards'],
+  machineGuards: Machine<any, any, any, any, any, any, any, any, any>['internal']['guards'],
   stateCatalog: Map<string, NormalizedStateItemBoth>,
 ) {
   const findTransition = o_readyToFindAlwaysTransition(fnBaseParam, machineGuards)

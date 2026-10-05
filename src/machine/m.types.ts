@@ -1,4 +1,4 @@
-import type { AnyFn, Duplicate, Expand, Placeholder, Values } from '../shared/general.types'
+import type { AnyFn, Expand, Merge, Placeholder, Values } from '../shared/general.types'
 
 
 export const EntrySymbol: unique symbol = Symbol('Entry')
@@ -168,8 +168,8 @@ export type MachineConfig<
   initialState?: StateName
   initContext?: (input: I) => C
   output?: (arg: FnBaseParams<C, E, I>[0]) => O // マシンが最終状態になったときに実行される
-  guards?: { [K in keyof G]: (arg: FnBaseParams<C, E, I>[0], params: G[K]) => boolean },
-  actions?: { [K in keyof A & string]: (arg: LimitedActionFnParams<C, E, I, EM>[0], params: A[K]) => unknown },
+  guards?: { [K in keyof G]: (arg: FnBaseParams<C, E, I>[0], params: G[K]) => boolean }
+  actions?: { [K in keyof A & string]: (arg: LimitedActionFnParams<C, E, I, EM>[0], params: A[K]) => unknown }
   services?: S
 }
 
@@ -178,7 +178,6 @@ export type TopLvStDefItem<Et extends string> = {
   internalEvents: { [K in InternalEType]?: InternalEvent }
 }
 
-export const MachineSymbol: unique symbol = Symbol('Machine')
 export type Machine<
   C extends MContext,
   E extends EventBody,
@@ -190,17 +189,30 @@ export type Machine<
   S extends Record<string, (input: any) => unknown>,
   ND extends NormalizedDefinition,
 > = {
-  [MachineSymbol]: true,
-  name: string,
-  initContext?: (input: I) => C
-  output?: (arg: FnBaseParams<C, E, I, unknown>[0]) => O // マシンが最終状態になったときに実行される
-  guards: { [K in keyof G]: (arg: FnBaseParams<C, E | InternalEventBody, I>[0], params: G[K]) => boolean }
-  actions: {
-    [K in keyof A]: (arg: LimitedActionFnParams<C, E | InternalEventBody, I, EM>[0], params: A[K]) => unknown
+  name: string
+  internal: {
+    initContext?: (input: I) => C
+    output?: (arg: FnBaseParams<C, E, I, unknown>[0]) => O // マシンが最終状態になったときに実行される
+    guards: { [K in keyof G]: (arg: FnBaseParams<C, E | InternalEventBody, I>[0], params: G[K]) => boolean }
+    actions: {
+      [K in keyof A]: (arg: LimitedActionFnParams<C, E | InternalEventBody, I, EM>[0], params: A[K]) => unknown
+    }
+    services: S
+    definition: ND
+    topLvDefItem: TopLvStDefItem<E['type']>
+    stateCatalog: Map<string, NormalizedStateItemBoth>
   }
-  services: S
-  definition: ND
-  topLvDefItem: TopLvStDefItem<E['type']>
-  stateCatalog: Map<string, NormalizedStateItemBoth>
-  regionPaths: string[]
+  provide: <
+    const nS extends Record<string, (input: any) => unknown>,
+    const nG extends Record<string, Placeholder> = Record<string, Placeholder>,
+    const nA extends Record<string, Placeholder> = Record<string, Placeholder>,
+  >(
+    implementations: {
+      guards?: { [K in keyof nG]: (arg: FnBaseParams<C, E | InternalEventBody, I>[0], params: nG[K]) => boolean },
+      actions?: {
+        [K in keyof nA]: (arg: LimitedActionFnParams<C, E | InternalEventBody, I, EM>[0], params: nA[K]) => unknown
+      }
+      services?: nS
+    }
+  ) => Readonly<Machine<C, E, I, EM, O, Merge<G, nG>, Merge<A, nA>, Merge<S, nS>, ND>>
 }
