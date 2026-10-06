@@ -248,6 +248,7 @@ describe('rt_main/basic', () => {
         states: ['/idle'],
         stateValue: '/idle',
         context: { failedAttempts: 0 },
+        c: { failedAttempts: 0 },
         runtimeStatus: 'active',
         output: undefined,
       })
@@ -255,6 +256,7 @@ describe('rt_main/basic', () => {
         states: [],
         stateValue: [],
         context: { failedAttempts: 0 },
+        c: { failedAttempts: 0 },
         runtimeStatus: 'stopped',
         output: undefined,
       })
@@ -263,6 +265,7 @@ describe('rt_main/basic', () => {
         states: ['/idle'],
         stateValue: '/idle',
         context: { failedAttempts: 1 },
+        c: { failedAttempts: 1 },
         runtimeStatus: 'active',
         output: undefined,
       })
@@ -274,6 +277,7 @@ describe('rt_main/basic', () => {
         states: ['/idle'],
         stateValue: '/idle',
         context: { failedAttempts: 2 },
+        c: { failedAttempts: 2 },
         runtimeStatus: 'active',
         output: undefined,
       })
@@ -284,6 +288,7 @@ describe('rt_main/basic', () => {
         states: ['/locked'],
         stateValue: '/locked',
         context: { failedAttempts: 3 },
+        c: { failedAttempts: 3 },
         runtimeStatus: 'done',
         output: undefined,
       })

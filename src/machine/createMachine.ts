@@ -13,6 +13,8 @@ import type {
   EmittedEvent,
   EventBody,
   FnBaseParams,
+  InternalEventBody,
+  LimitedActionFnParams,
   Machine,
   MachineConfig,
   MContext,
@@ -22,12 +24,11 @@ import type {
   NStateItemDef,
   ParallelNormalizedDefinition,
   ParamsInput,
+  ServiceOptions,
   StateName,
   TopLvStDefItem,
-  InternalEventBody,
-  LimitedActionFnParams,
 } from './m.types'
-import { EntrySymbol, ExitSymbol, InvokeSymbol, ParallelSymbol, SubStatesSymbol } from './m.types'
+import { EntrySymbol, ExitSymbol, InvokeSymbol, MachineSymbol, ParallelSymbol, SubStatesSymbol } from './m.types'
 
 type X_HiddenImpl = any & { __brand: 'HiddenImpl' }
 type X_DefTypeRefluxer<
@@ -38,7 +39,10 @@ type X_DefTypeRefluxer<
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   Eb extends BuiltinEType = BuiltinEType,
-  S extends Record<string, (input: any) => unknown> = Record<string, (input: any) => unknown>, // Services
+  S extends Record<string, (input: any, option: ServiceOptions) => unknown> = Record<
+    string,
+    (input: any, option: ServiceOptions) => unknown
+  >,
   R = unknown,
 > = () => R
 
@@ -116,7 +120,7 @@ type StateDefinition<
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
-  S extends Record<string, (input: any) => unknown>,
+  S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
 > = null | Array<
   | StDefCoreItem<C, E, I, EM, G, A>
   | readonly [X_DefTypeRefluxer<C, E, I, EM, G, A, BuiltinEType, S, any>, unknown] // subStates|parallel
@@ -145,11 +149,14 @@ function exitHook<
   return [ExitSymbol, (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A>, null, actions] as const // StDefItems
 }
 
-type O_ExtractEvent<E extends EventBody, Et extends E['type']> =
-  Et extends ChildDoneEType ? Expand<ChildDoneEventBody>
-  : Et extends BuiltinEType ? E
-  : E extends { type: Et } ? E
-  : Et extends E['type'] ? E
+type O_ExtractEvent<E extends EventBody, Et extends E['type']> = Et extends ChildDoneEType
+  ? Expand<ChildDoneEventBody>
+  : Et extends BuiltinEType
+  ? E
+  : E extends { type: Et }
+  ? E
+  : Et extends E['type']
+  ? E
   : never
 
 type O_Transition<
@@ -185,7 +192,7 @@ function subStates<
   EM extends EmittedEvent,
   const G extends Record<string, Placeholder>,
   const A extends Record<string, Placeholder>,
-  S extends Record<string, (input: any) => unknown>,
+  S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
   const D extends { [K in string]: StateDefinition<C, E, I, EM, G, A, S> },
   const Initial extends keyof D & string,
 >(stateDefinition: D, initialState?: Initial) {
@@ -219,7 +226,7 @@ function parallel<
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
-  S extends Record<string, (input: any) => unknown>,
+  S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
   const PD extends {
     [K in string]:
     | [Array<StDefCoreItem<C, E, I, EM, G, A>>, { [L in string]: StateDefinition<C, E, I, EM, G, A, S> }]
@@ -250,7 +257,7 @@ function parallel<
   ] as const // StateDefinition
 }
 
-type O_IntoServiceFn<Src, S extends Record<string, (input: any) => unknown>> = Src extends AnyFn
+type O_IntoServiceFn<Src, S extends Record<string, (input: any, option: ServiceOptions) => unknown>> = Src extends AnyFn
   ? Src
   : Src extends keyof S
   ? S[Src]
@@ -275,11 +282,11 @@ function invoke<
   EM extends EmittedEvent,
   const G extends Record<string, Placeholder>,
   const A extends Record<string, Placeholder>,
-  S extends Record<string, (input: any) => unknown>,
-  Src extends keyof S | ((input: [Si] extends [never] ? unknown : Si) => unknown),
+  S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
+  Src extends keyof S | ((input: [Si] extends [never] ? any : Si, option: ServiceOptions) => unknown),
   Si = never,
 >(
-  preparation: {
+  config: {
     id?: string
     input?: (arg: FnBaseParams<C, E, I>[0]) => Src extends keyof S ? Parameters<S[Src]>[0] : Si
   },
@@ -290,7 +297,7 @@ function invoke<
     InvokeSymbol,
     (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A, BuiltinEType, S>,
     null,
-    preparation as X_HiddenImpl,
+    config as X_HiddenImpl,
     src as X_HiddenImpl,
     cleanupEvents,
   ] as const // StateDefinition
@@ -500,7 +507,7 @@ function transformParallelNormalizedDefinition<
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
-  S extends Record<string, (input: any) => unknown>,
+  S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
 >() {
   return <
     const PD extends {
@@ -653,7 +660,7 @@ function getDefinitionAndCatalog<
   const I,
   const EM extends EmittedEvent,
   const O,
-  const S extends Record<string, (input: any) => unknown>,
+  const S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
   const D extends { [K in string]: StateDefinition<C, E, I, EM, G, A, S> },
   const G extends Record<string, Placeholder> = Record<string, Placeholder>,
   const A extends Record<string, Placeholder> = Record<string, Placeholder>,
@@ -735,7 +742,7 @@ export function createMachine<
   const I,
   const EM extends EmittedEvent,
   const O,
-  const S extends Record<string, (input: any) => unknown>,
+  const S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
   const D extends { [K in string]: StateDefinition<C, E, I, EM, G, A, S> },
   const G extends Record<string, Placeholder> = Record<string, Placeholder>,
   const A extends Record<string, Placeholder> = Record<string, Placeholder>,
@@ -757,6 +764,7 @@ export function createMachine<
     name: name || '(machine)',
     provide,
     internal: {
+      [MachineSymbol]: true,
       initContext,
       output,
       guards: guards || ({} as any),
@@ -765,7 +773,7 @@ export function createMachine<
       definition,
       topLvDefItem: topLvDefItem as TopLvStDefItem<E['type']>,
       stateCatalog,
-    }
+    },
   }
   return deepFreeze(m)
 }
@@ -778,7 +786,7 @@ function provide<
   O,
   const G extends Record<string, Placeholder>,
   const A extends Record<string, Placeholder>,
-  const S extends Record<string, (input: any) => unknown>,
+  const S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
   ND extends NormalizedDefinition,
   const nS extends Record<string, (input: any) => unknown>,
   const nG extends Record<string, Placeholder> = Record<string, Placeholder>,
@@ -786,12 +794,12 @@ function provide<
 >(
   this: Machine<C, E, I, EM, any, G, A, S, ND>,
   implementations: {
-    guards?: { [K in keyof nG]: (arg: FnBaseParams<C, E | InternalEventBody, I>[0], params: nG[K]) => boolean },
+    guards?: { [K in keyof nG]: (arg: FnBaseParams<C, E | InternalEventBody, I>[0], params: nG[K]) => boolean }
     actions?: {
       [K in keyof nA]: (arg: LimitedActionFnParams<C, E | InternalEventBody, I, EM>[0], params: nA[K]) => unknown
     }
     services?: nS
-  }
+  },
 ): Readonly<Machine<C, E, I, EM, O, Merge<G, nG>, Merge<A, nA>, Merge<S, nS>, ND>> {
   const { internal } = this
   const { guards, actions, services } = internal
@@ -802,11 +810,10 @@ function provide<
       guards: { ...guards, ...implementations.guards },
       actions: { ...actions, ...implementations.actions },
       services: { ...services, ...implementations.services },
-    }
+    },
   }
   return deepFreeze(newMachine) as any
 }
-
 
 export const __test__ = {
   getDefinitionAndCatalog,

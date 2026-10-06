@@ -3,13 +3,14 @@ import type {
   EventBody,
   InternalEPayload,
   InternalEventBody,
+  ServiceOptions,
   Machine,
   MContext,
   NormalizedDefinition,
   PureETypeString,
 } from '../machine/m.types'
 import { ST_DELIM } from '../shared/constants'
-import type { Placeholder } from '../shared/general.types'
+import type { Expand, Placeholder } from '../shared/general.types'
 import { defineFixedProperty } from '../shared/utils'
 import { MailBox } from './MailBox'
 import type { StateRoute } from './r.types'
@@ -19,11 +20,12 @@ import { runtimeUtils } from './runtime_utils'
 
 export type RuntimeStatus = 'stopped' | 'active' | 'done' | 'error'
 
-type Observer<C extends MContext, O> = (current: Snapshot<C, O>, prev: Snapshot<C, O>) => void
+type Observer<C extends MContext, O> = (current: Expand<Snapshot<C, O>>, prev: Expand<Snapshot<C, O>>) => void
 type Snapshot<C extends MContext, O> = {
   states: string[]
   stateValue: string | string[]
-  context: X_RemovePrivateKeys<C>
+  context: Expand<X_RemovePrivateKeys<C>>
+  c: Expand<X_RemovePrivateKeys<C>>
   runtimeStatus: RuntimeStatus
   output: O | undefined
 }
@@ -44,7 +46,7 @@ export function createRuntime<
   O,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
-  S extends Record<string, (input: any) => unknown>,
+  S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
   const ND extends NormalizedDefinition,
 >(machine: Machine<C, E, I, EM, O, G, A, S, ND>, option?: RuntimeOption<I>) {
   const runtime = new Runtime(machine, option)
@@ -59,7 +61,7 @@ class Runtime<
   O,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
-  S extends Record<string, (input: any) => unknown>,
+  S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
   const ND extends NormalizedDefinition,
 > {
   readonly id!: string
@@ -222,6 +224,7 @@ class Runtime<
           return states.length === 1 ? states[0]! : states
         },
         context,
+        c: context,
         runtimeStatus: isCompleted ? 'done' : runtimeStatus || oldSnapshot.runtimeStatus,
         output: !(isCompleted && output)
           ? undefined

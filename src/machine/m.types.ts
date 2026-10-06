@@ -104,7 +104,6 @@ export type NStateItemDef<Et extends string> = {
   //tags: Set<string>
   entryHooks: NormalizedAction[] | null
   exitHooks: NormalizedAction[] | null
-  //always: O_NormalizedTransition[]
   //delays: Array<O_NormalizedTransition & { after: number }>
   invocations: Array<NormalizedInvocation>
   internalEvents: { [K in InternalEType]?: InternalEvent }
@@ -153,6 +152,9 @@ export type UpdateFn<C extends MContext> = (updates: UpdateFnParam<C>) => unknow
 export type EmitFn<EM extends EmittedEvent> = (emittedEvent: EM) => unknown
 
 
+//export type ServiceOptions = { signal: AbortSignal } // TODO
+export type ServiceOptions = undefined
+
 export type MachineConfig<
   C extends MContext,
   E extends EventBody,
@@ -161,7 +163,7 @@ export type MachineConfig<
   O,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
-  S extends Record<string, (input: any) => unknown>,
+  S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
 > = {
   types?: { context?: C; events?: E; emitted?: EM; input?: I; output?: O }
   name?: string
@@ -177,6 +179,7 @@ export type TopLvStDefItem<Et extends string> = {
   events: { [K in Et]?: NormalizedTransition[] }
   internalEvents: { [K in InternalEType]?: InternalEvent }
 }
+export const MachineSymbol: unique symbol = Symbol('Machine')
 
 export type Machine<
   C extends MContext,
@@ -186,11 +189,12 @@ export type Machine<
   O,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
-  S extends Record<string, (input: any) => unknown>,
+  S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
   ND extends NormalizedDefinition,
 > = {
   name: string
   internal: {
+    [MachineSymbol]: true
     initContext?: (input: I) => C
     output?: (arg: FnBaseParams<C, E, I, unknown>[0]) => O // マシンが最終状態になったときに実行される
     guards: { [K in keyof G]: (arg: FnBaseParams<C, E | InternalEventBody, I>[0], params: G[K]) => boolean }

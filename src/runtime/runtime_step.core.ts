@@ -673,6 +673,7 @@ export function* updateStateRouteForEntry(
   )
 }
 
+
 export function launchInvocations(
   invocations: NormalizedInvocation[],
   path: string,
@@ -685,10 +686,17 @@ export function launchInvocations(
   const fnBaseParam = makeFnBaseParam()
   for (const { id, input, src } of invocations) {
     const inputValue = input && typeof input === 'function' ? input(fnBaseParam) : undefined
-    Promise.resolve(typeof src === 'function' ? src(inputValue) : machineServices[src]?.(inputValue))
-      .then((data) => {
+    const qSrc = (() => {
+      if (typeof src === 'function') return src
+      const s = machineServices[src]
+      if (!s) throw new Error(`invoke: Unknown src: "${src}"`)
+      return s
+    })()
+    Promise.resolve()
+      .then(() => qSrc(inputValue))
+      .then((output) => {
         if (stateRouteElRef.deref()) {
-          enqueueEvent({ type: `${id}/done`, data }, { path })
+          enqueueEvent({ type: `${id}/done`, output }, { path })
         }
       })
       .catch((error) => {
