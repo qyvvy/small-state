@@ -6,7 +6,7 @@
     "source.fixAll.biome": "explicit",
     "source.organizeImports.biome": "explicit"
   },
-  "cSpell.words": ["biome", "cdate", "refluxer", "arktype", "macrostep", "microstep", "microsteps"],
+  "cSpell.words": ["biome", "arktype", "qyvvy", "refluxer", "macrostep", "microstep", "microsteps", "interm"],
   "cSpell.minWordLength": 5,
   "cSpell.ignoreRegExpList": [
     "/\\b.*?ees?\\b/",
