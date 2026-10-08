@@ -257,7 +257,7 @@ describe('machine', () => {
             state1: [on()],
           }),
         ),
-      ).toThrow(/must be an array or an object \(was undefined\)/)
+      ).toThrow(/must be .+? \(was undefined\)/)
     })
     test('3.2: on の空の config は許容されない', async () => {
       expect(() =>
@@ -1447,30 +1447,30 @@ describe('machine', () => {
               pPath: '',
               invocations: [
                 {
-                  id: '(invocation-0)',
+                  id: '/state1[0]',
                   input: expect.any(Function),
-                  src: 'increment',
+                  src: { type: 'string', value: 'increment' },
                 },
                 {
-                  id: '(invocation-1)',
+                  id: '/state1[1]',
                   input: expect.any(Function),
-                  src: expect.any(Function),
+                  src: { type: 'function', value: expect.any(Function) },
                 },
               ],
               internalEvents: {
-                '(invocation-0)/done': {
+                'invoke/done[0]': {
                   cond: expect.any(Function),
                   transitions: [{ to: 'state2', fullTo: '/state2', actions: [expect.any(Function)], guards: [] }],
                 },
-                '(invocation-0)/error': {
+                'invoke/error[0]': {
                   cond: expect.any(Function),
                   transitions: [{ to: 'state3', fullTo: '/state3', actions: [expect.any(Function)], guards: [] }],
                 },
-                '(invocation-1)/done': {
+                'invoke/done[1]': {
                   cond: expect.any(Function),
                   transitions: [{ to: 'state2', fullTo: '/state2', actions: [expect.any(Function)], guards: [] }],
                 },
-                '(invocation-1)/error': {
+                'invoke/error[1]': {
                   cond: expect.any(Function),
                   transitions: [{ to: 'state3', fullTo: '/state3', actions: [expect.any(Function)], guards: [] }],
                 },
@@ -1500,17 +1500,17 @@ describe('machine', () => {
                       {
                         id: 'state2-invocation',
                         input: expect.any(Function),
-                        src: expect.any(Function),
+                        src: { type: 'function', value: expect.any(Function) },
                       },
                     ],
                     internalEvents: {
-                      'state2-invocation/done': {
+                      'invoke/done[0]': {
                         cond: expect.any(Function),
                         transitions: [
                           { to: 'subState2', fullTo: '/state2/subState2', actions: [expect.any(Function)], guards: [] },
                         ],
                       },
-                      'state2-invocation/error': {
+                      'invoke/error[0]': {
                         cond: expect.any(Function),
                         transitions: [{ actions: [expect.any(Function)], guards: [] }],
                       },

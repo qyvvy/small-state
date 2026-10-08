@@ -1,7 +1,6 @@
 import { type } from 'arktype'
-import { AnyFn } from "./arktype.internal";
+import { AnyFn, FunctionRecord } from "./arktype.internal";
 
-const FunctionRecord = type({ '[string]': AnyFn })
 
 const o_Types = type({
   '+': 'reject',

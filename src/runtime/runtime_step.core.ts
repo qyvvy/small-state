@@ -29,7 +29,8 @@ import type {
 import { ST_DELIM } from '../shared/constants'
 import type { AnyFn, Placeholder, RecursiveRecord, Values } from '../shared/general.types'
 import { deepFreeze, parentPathOf, splitStPath } from '../shared/utils'
-import type { StateRoute } from './r.types'
+import { createRuntime } from './Runtime'
+import type { RuntimeOutbound, StateRoute } from './r.types'
 import {
   readyToEvalGuard,
   resolveActionElement,
@@ -37,7 +38,6 @@ import {
   runtimeUtils,
   traverseStateRouteMatch,
 } from './runtime_utils'
-
 
 type X_TransitionCandidate = {
   leaves: string[] // 遷移元パス候補(末端ステート)
@@ -53,10 +53,8 @@ export type TransitionExec = {
 
 export type StateEntryAdditionalData = {
   stateName: string
-  routeEl: StateRoute | StateRoute[number]
   isRegionChild?: boolean
 }
-export type EnqueueEventFn<E extends EventBody> = (event: E | InternalEventBody, payload?: InternalEPayload) => void
 
 function buildTransitionCandidate(
   transition: NormalizedTransition,
@@ -82,7 +80,7 @@ const x_getStItemDef = (stPath: string, stateCatalog: Map<string, NormalizedStat
 
 function o_deriveLowestCommonAncestor(model: string, leaves: string[]) {
   let crrLeaves = leaves
-  let bgn = 1 // model, comparands は '/' から始まる想定なので最初の1文字はスキップしている
+  let bgn = 1 // model, leaves は '/' から始まる想定なので最初の1文字はスキップしている
   let end = model.indexOf(ST_DELIM, bgn) + 1
   while (end) {
     const needle = model.slice(bgn, end)
@@ -382,9 +380,6 @@ export function readyAction<
     },
 
     processQueue() {
-      //await updatingQueue.onIdle()
-      //_local.reflect()
-
       // enqueue 中で enqueue したら警告する
       isProcessingQueue = true
       try {
@@ -399,7 +394,6 @@ export function readyAction<
         enqueuees = []
         isProcessingQueue = false
       }
-      //await updatingQueue.onIdle()
     },
 
     getResult() {
@@ -620,13 +614,13 @@ function* o_genStateEntryData(
         { isRegions: false }
       >
       route.push(el)
-      yield [def, { stateName: dKey, routeEl: el, isRegionChild }]
+      yield [def, { stateName: dKey, isRegionChild }]
       oo_addParallelToDestTree(childTree, sub.stateOf)
       yield* o_genStateEntryData(childTree, { isRegions: true, regions }, -1, sub)
     } else if (target.isRegions) {
       const route: StateRoute = []
       target.regions[dKey] = route
-      yield [def, { stateName: dKey, routeEl: route }]
+      yield [def, { stateName: dKey }]
       if (sub) {
         yield* o_genStateEntryData(childTree, { isRegions: false, route, isRegionChild: true }, -1, sub)
       }
@@ -634,7 +628,7 @@ function* o_genStateEntryData(
       const { route, isRegionChild } = target
       const el = Object(dKey)
       route.push(el)
-      yield [def, { stateName: dKey, routeEl: el, isRegionChild }]
+      yield [def, { stateName: dKey, isRegionChild }]
       if (sub) {
         yield* o_genStateEntryData(childTree, { isRegions: false, route, isRegionChild: false }, -1, sub)
       }
@@ -645,7 +639,7 @@ function* o_genStateEntryData(
   }
 }
 
-// NOTE: fullToSplittees が空でも末端リーフを遷移先に追加するので遷移先がない場合は次善に弾く必要がある
+// NOTE: fullToSplittees が空でも末端リーフを遷移先に追加するので遷移先がない場合は事前に弾く必要がある
 export function* updateStateRouteForEntry(
   fullToSplittees: string[][],
   crrStates: StateRoute,
@@ -677,36 +671,69 @@ export function* updateStateRouteForEntry(
 export function launchInvocations(
   invocations: NormalizedInvocation[],
   path: string,
-  stateRouteEl: StateRoute | StateRoute[number],
   makeFnBaseParam: () => FnBaseParams<any, any, any>[0],
   machineServices: Machine<any, any, any, any, any, any, any, any, any>['internal']['services'],
-  enqueueEvent: EnqueueEventFn<any>,
+  rtOutbound: RuntimeOutbound<any>,
 ) {
-  const stateRouteElRef = new WeakRef(stateRouteEl) // stateRouteEl が生存していなければ enqueueEvent しない
+  const { enqueueEvent } = rtOutbound
   const fnBaseParam = makeFnBaseParam()
-  for (const { id, input, src } of invocations) {
+  for (const [i, { id, input, src }] of invocations.entries()) {
     const inputValue = input && typeof input === 'function' ? input(fnBaseParam) : undefined
-    const qSrc = (() => {
-      if (typeof src === 'function') return src
-      const s = machineServices[src]
-      if (!s) throw new Error(`invoke: Unknown src: "${src}"`)
-      return s
-    })()
+    let srcFn: AnyFn
+    switch (src.type) {
+      case 'machine': {
+        const childRt = createRuntime(src.value, { id, input: () => inputValue })
+        rtOutbound.children = { ...rtOutbound.children, [id!]: childRt }
+        childRt.subscribe(({ runtimeStatus, output }) => {
+          if (runtimeStatus === 'done') {
+            enqueueEvent({ type: `invoke/done[${i}]`, output }, { path })
+          }
+        })
+        childRt.start()
+        continue
+      }
+      case 'string': {
+        srcFn = machineServices[src.value]
+        if (!srcFn) throw new Error(`invoke: Unknown src: "${src.value}"`)
+        break
+      }
+      case 'function': {
+        srcFn = src.value
+        break
+      }
+    }
+    const abController = new AbortController()
+    const { signal } = abController
+    rtOutbound.children = {
+      ...rtOutbound.children,
+      [id!]: { stop: () => abController.abort() },
+    }
     Promise.resolve()
-      .then(() => qSrc(inputValue))
+      .then(() => srcFn(inputValue, { signal }))
       .then((output) => {
-        if (stateRouteElRef.deref()) {
-          enqueueEvent({ type: `${id}/done`, output }, { path })
+        if (!signal.aborted) {
+          enqueueEvent({ type: `invoke/done[${i}]`, output }, { path })
         }
       })
       .catch((error) => {
-        if (stateRouteElRef.deref()) {
-          enqueueEvent({ type: `${id}/error`, error }, { path })
+        if (!signal.aborted) {
+          enqueueEvent({ type: `invoke/error[${i}]`, error }, { path })
         }
       })
   }
 }
 
+export function stopInvocations(
+  invocations: NormalizedInvocation[],
+  rtOutbound: RuntimeOutbound<any>,
+) {
+  const newChildren = { ...rtOutbound.children }
+  for (const { id } of invocations) {
+    newChildren[id!]!.stop()
+    delete newChildren[id!]
+  }
+  rtOutbound.children = newChildren
+}
 
 function o_gatherAllChildrenOutputs<C extends MContext, Ex extends EventBody, I>(
   regions: Record<string, StateRoute>,
@@ -802,7 +829,6 @@ export function* genChildDoneEvents<C extends MContext, Ex extends EventBody, I>
     }
   }
 }
-
 
 function o_readyToFindAlwaysTransition<C extends MContext, Ex extends EventBody, I>(
   fnBaseParam: FnBaseParams<C, Ex, I>[0],

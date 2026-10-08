@@ -1,7 +1,7 @@
 import { type as arkType } from 'arktype'
 import { ST_DELIM } from '../shared/constants'
 import type { AnyFn, Expand, Merge, OneOrMany, Placeholder, Values } from '../shared/general.types'
-import { assertOrThrow, deepFreeze, ensureArray, parentPathOf, randomString } from '../shared/utils'
+import { assertOrThrow, deepFreeze, ensureArray, parentPathOf } from '../shared/utils'
 import * as ark_m_config from './arktype/ark_m_config'
 import type * as ark_normalized from './arktype/ark_normalized'
 import * as ark_stdef from './arktype/ark_stdef'
@@ -13,12 +13,14 @@ import type {
   EmittedEvent,
   EventBody,
   FnBaseParams,
+  InternalEPayload,
   InternalEventBody,
   LimitedActionFnParams,
   Machine,
   MachineConfig,
   MContext,
   NormalizedDefinition,
+  NormalizedSrc,
   NormalizedStateItemBoth,
   NormalizedTransition,
   NStateItemDef,
@@ -257,11 +259,25 @@ function parallel<
   ] as const // StateDefinition
 }
 
-type O_IntoServiceFn<Src, S extends Record<string, (input: any, option: ServiceOptions) => unknown>> = Src extends AnyFn
-  ? Src
-  : Src extends keyof S
-  ? S[Src]
-  : never
+
+const invokeConfigProps = new Set(['id', 'input'])
+function o_isInvokeConfig(v: any): v is { id?: string; input?: unknown } {
+  if (typeof v !== 'object') return false
+  for (const key of Object.keys(v)) {
+    if (!invokeConfigProps.has(key)) return false
+  }
+  return true
+}
+
+type OO_IntoServiceFn<
+  Src,
+  S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
+> = Src extends AnyFn ? Src : Src extends keyof S ? S[Src] : never
+
+type O_InferOutput<Src, S extends Record<string, (input: any, option: ServiceOptions) => unknown>> =
+  Src extends Machine<any, any, any, any, any, any, any, any, any>
+  ? ReturnType<Exclude<Src['internal']['output'], undefined>>
+  : Awaited<ReturnType<OO_IntoServiceFn<Src, S>>>
 
 type InvocationCleanupEvents<
   C extends MContext,
@@ -275,6 +291,7 @@ type InvocationCleanupEvents<
   | readonly ['error', X_DefTypeRefluxer<C, { type: 'error'; error: Error }, I, EM, G, A, never>, X_HiddenImpl] // on
 >
 
+// Overloads:
 function invoke<
   C extends MContext,
   E extends EventBody,
@@ -283,16 +300,89 @@ function invoke<
   const G extends Record<string, Placeholder>,
   const A extends Record<string, Placeholder>,
   S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
-  Src extends keyof S | ((input: [Si] extends [never] ? any : Si, option: ServiceOptions) => unknown),
-  Si = never,
+  Src extends
+  | keyof S
+  | ((input: [SrcInput] extends [never] ? any : SrcInput, option: ServiceOptions) => unknown)
+  | Machine<any, any, [SrcInput] extends [never] ? any : SrcInput, any, any, any, any, any, any>,
+  SrcInput = never,
 >(
   config: {
     id?: string
-    input?: (arg: FnBaseParams<C, E, I>[0]) => Src extends keyof S ? Parameters<S[Src]>[0] : Si
+    input?: (arg: FnBaseParams<C, E, I>[0]) => Src extends keyof S ? Parameters<S[Src]>[0] : SrcInput
   },
   src: Src,
-  ...cleanupEvents: InvocationCleanupEvents<C, I, EM, G, A, Awaited<ReturnType<O_IntoServiceFn<Src, S>>>>
+  ...cleanupEvents: InvocationCleanupEvents<C, I, EM, G, A, O_InferOutput<Src, S>>
+): readonly [
+  typeof InvokeSymbol,
+  X_DefTypeRefluxer<C, E, I, EM, G, A, BuiltinEType, S, unknown>,
+  null,
+  any,
+  any,
+  InvocationCleanupEvents<C, I, EM, G, A, O_InferOutput<Src, S>>,
+]
+function invoke<
+  C extends MContext,
+  E extends EventBody,
+  I,
+  EM extends EmittedEvent,
+  const G extends Record<string, Placeholder>,
+  const A extends Record<string, Placeholder>,
+  S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
+  Src extends
+  | keyof S
+  | ((input: [SrcInput] extends [never] ? any : SrcInput, option: ServiceOptions) => unknown)
+  | Machine<any, any, [SrcInput] extends [never] ? any : SrcInput, any, any, any, any, any, any>,
+  SrcInput = never,
+>(
+  src: Src,
+  ...cleanupEvents: InvocationCleanupEvents<C, I, EM, G, A, O_InferOutput<Src, S>>
+): readonly [
+  typeof InvokeSymbol,
+  X_DefTypeRefluxer<C, E, I, EM, G, A, BuiltinEType, S, unknown>,
+  null,
+  any,
+  any,
+  InvocationCleanupEvents<C, I, EM, G, A, O_InferOutput<Src, S>>,
+]
+
+// Implementation:
+function invoke<
+  C extends MContext,
+  E extends EventBody,
+  I,
+  EM extends EmittedEvent,
+  const G extends Record<string, Placeholder>,
+  const A extends Record<string, Placeholder>,
+  S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
+  Src extends
+  | keyof S
+  | ((input: [SrcInput] extends [never] ? any : SrcInput, option: ServiceOptions) => unknown)
+  | Machine<any, any, [SrcInput] extends [never] ? any : SrcInput, any, any, any, any, any, any>,
+  SrcInput = never,
+>(
+  ...args:
+    | [
+      config: {
+        id?: string
+        input?: (arg: FnBaseParams<C, E, I>[0]) => Src extends keyof S ? Parameters<S[Src]>[0] : SrcInput
+      },
+      src: Src,
+      ...cleanupEvents: InvocationCleanupEvents<C, I, EM, G, A, O_InferOutput<Src, S>>,
+    ]
+    | [src: Src, ...cleanupEvents: InvocationCleanupEvents<C, I, EM, G, A, O_InferOutput<Src, S>>]
 ) {
+  const [arg, ...rest] = args
+  let config = {},
+    src: any,
+    cleanupEvents: any
+  if (o_isInvokeConfig(arg)) {
+    config = arg
+      ;[src, ...cleanupEvents] = rest
+  } else {
+    src = arg
+    cleanupEvents = rest
+  }
+
   return [
     InvokeSymbol,
     (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A, BuiltinEType, S>,
@@ -338,7 +428,6 @@ function x_parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateN
   }
 
   const _getPath = () => `${def.pPath}${ST_DELIM}${stateName}`
-  const seenInvocationId = new Set<string>()
   for (const [i, item] of items.entries()) {
     if (!Array.isArray(item)) {
       if ('final' in item) {
@@ -370,7 +459,7 @@ function x_parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateN
             break
           case ':childDone:':
             def.internalEvents[':childDone:'] = {
-              cond: ({ path }) => path === _getPath(),
+              cond: ({ path }: InternalEPayload) => path === _getPath(),
               transitions: nTransitions,
             }
             break
@@ -383,36 +472,35 @@ function x_parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateN
       case 'symbol': {
         switch (item[0]) {
           case InvokeSymbol: {
-            const { id, ...rest } = item[3]
-            const ivkId = id || `(invocation-${i})`
-            if (seenInvocationId.has(ivkId)) {
-              throw new Error(`createMachine: Duplicate invocation id: "${ivkId}", at state:"${stateName}"[${i}]`)
-            }
-            seenInvocationId.add(ivkId)
-            def.invocations.push({ id: ivkId, ...rest, src: item[4] })
+            const rawSrc = item[4]
+            const src: NormalizedSrc = (() => {
+              switch (typeof rawSrc) {
+                case 'object':
+                  return { type: 'machine', value: rawSrc }
+                case 'function':
+                  return { type: 'function', value: rawSrc }
+                default:
+                  return { type: 'string', value: rawSrc }
+              }
+            })()
+            const { invocations, internalEvents } = def
+            invocations.push({ ...item[3], src })
 
-            const { internalEvents } = def
             for (const [j, [ivkEType, _, cleanupEvents]] of item[5].entries()) {
               if (!(ivkEType === 'done' || ivkEType === 'error')) {
                 throw new Error(
                   `createMachine: Invocation event must be 'done' or 'error': ${ivkEType}, at state:"${stateName}"[${i}] > invoke events[${j}]`,
                 )
               }
-              const internalEType = `${ivkId}/${ivkEType}` as const
-              if (Object.hasOwn(internalEvents, internalEType)) {
-                throw new Error(
-                  `createMachine: Duplicate invocation event: ${ivkEType}, at state:"${stateName}"[${i}] > invoke events[${j}]`,
-                )
-              }
-              const mid = ensureArray(cleanupEvents!)
-              if (!mid.length || mid.some((t) => !Object.keys(t).length)) {
+              const interm = ensureArray(cleanupEvents!)
+              if (!interm.length || interm.some((t) => !Object.keys(t).length)) {
                 throw new Error(
                   `createMachine: on(eventType, config): The 'config' argument is required, at state:"${stateName}"[${i}] > invoke events[${j}] event:"${ivkEType}"`,
                 )
               }
-              internalEvents[internalEType] = {
-                cond: ({ path }) => path === _getPath(),
-                transitions: o_normalizeTransitions(mid),
+              internalEvents[`invoke/${ivkEType}[${invocations.length - 1}]`] = {
+                cond: ({ path }: InternalEPayload) => path === _getPath(),
+                transitions: o_normalizeTransitions(interm),
               }
             }
             break
@@ -455,16 +543,23 @@ function o_normalizeStates<const D extends Record<string, StateDefinition<any, a
   stateDefOf: D,
 ) {
   return Object.entries(stateDefOf).reduce(
-    (acc, [stateName, stDefs]: [keyof D & string, unknown], i) => {
-      if (stateName.includes(ST_DELIM)) {
-        throw new Error(`createMachine: State names cannot contain the character "${ST_DELIM}": "${stateName}"`)
+    (acc, [stKey, stDefs]: [keyof D & string, unknown], i) => {
+      if (stKey.includes(ST_DELIM)) {
+        throw new Error(`createMachine: State names cannot contain the character "${ST_DELIM}": "${stKey}"`)
       } else if (Array.isArray(stDefs) || stDefs == null) {
-        const items = ark_stdef.StateDefinition.assert(stDefs)
-        const { def, sub } = x_parseStDefItems(items, stateName)
-        acc[stateName] = { def, sub } as any
+        try {
+          const items = ark_stdef.StateDefinition.assert(stDefs)
+          const { def, sub } = x_parseStDefItems(items, stKey)
+          acc[stKey] = { def, sub } as any
+        } catch (err) {
+          if (err instanceof Error) {
+            throw new Error(`createMachine:(at state "${stKey}") ${err.name}: ${err.message}`,)
+          }
+
+        }
       } else {
         throw new Error(
-          `createMachine: Invalid state definition for state "${String(stateName)}". Expected an array but got ${typeof stDefs}.`,
+          `createMachine: Invalid state definition for state "${String(stKey)}". Expected an array but got ${typeof stDefs}.`,
         )
       }
       return acc
@@ -549,9 +644,10 @@ function transformParallelNormalizedDefinition<
 
 // ===
 
-function o_setPPathAndAddCatalog(
+function o_setPPathAndInvocationIdThenAddCatalog(
   nStItemRecord: NormalizedDefinition['stateOf'] | ParallelNormalizedDefinition['stateOf'],
   parent: string,
+  invokeIds: Set<string>,
   addToCatalog: (stPath: string, state: NormalizedStateItemBoth) => unknown,
   isRegion: boolean,
   addRegionPath: (regionPath: string) => unknown,
@@ -560,13 +656,21 @@ function o_setPPathAndAddCatalog(
     const { def, sub } = nState
     def.pPath = parent
     const stPath = `${parent}${ST_DELIM}${key}`
+    for (const [i, e] of def.invocations.entries()) {
+      const id = e.id || `${stPath}[${i}]`
+      e.id = id
+      if (invokeIds.has(id)) {
+        throw new Error(`createMachine: Duplicate invoke id: ${id}, at state:"${stPath}"`)
+      }
+      invokeIds.add(id)
+    }
     addToCatalog(stPath, nState)
     if (isRegion) {
       addRegionPath(stPath)
     }
     if (sub) {
       const isParallel = 'dType' in sub && sub.dType === 'regions'
-      o_setPPathAndAddCatalog(sub.stateOf, stPath, addToCatalog, isParallel, addRegionPath)
+      o_setPPathAndInvocationIdThenAddCatalog(sub.stateOf, stPath, invokeIds, addToCatalog, isParallel, addRegionPath)
     }
   }
 }
@@ -703,9 +807,10 @@ function getDefinitionAndCatalog<
   // Setup stateCatalog and regionPaths
   const stateCatalog = new Map<string, NormalizedStateItemBoth>()
   const regionPaths: string[] = []
-  o_setPPathAndAddCatalog(
+  o_setPPathAndInvocationIdThenAddCatalog(
     stateOf,
     '',
+    new Set<string>(),
     (stPath: string, state: NormalizedStateItemBoth) => stateCatalog.set(stPath, state),
     false,
     (regionPath: string) => regionPaths.push(regionPath),
@@ -751,7 +856,6 @@ export function createMachine<
   defineStates: (
     define: Expand<X_DefineStatesParam>,
   ) => readonly [X_GlobalEvents<C, E, I, EM, G, A>, D] | readonly [D] | D,
-  //defineStates: ( define: Expand<T_DefineStatesParam>) => D,
 ) {
   const { definition, topLvDefItem, stateCatalog } = getDefinitionAndCatalog<C, E, I, EM, O, S, D, G, A>(
     config,

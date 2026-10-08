@@ -78,7 +78,7 @@ describe('runtime_step.core', () => {
       test('2:model が部分', async () => {
         expect(o_deriveLowestCommonAncestor('/a/aa', ['/a/aa/aa1'])).toBe('/a')
       })
-      test('2:comparands が部分', async () => {
+      test('2:leaves が部分', async () => {
         expect(o_deriveLowestCommonAncestor('/a/aa/aa1', ['/a/aa'])).toBe('/a')
       })
       test('2.1: デリミタの手前までを判定（末尾のステートは対象外）', async () => {

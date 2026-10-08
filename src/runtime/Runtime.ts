@@ -3,33 +3,36 @@ import type {
   EventBody,
   InternalEPayload,
   InternalEventBody,
-  ServiceOptions,
   Machine,
   MContext,
   NormalizedDefinition,
   PureETypeString,
+  ServiceOptions,
 } from '../machine/m.types'
 import { ST_DELIM } from '../shared/constants'
 import type { Expand, Placeholder } from '../shared/general.types'
 import { defineFixedProperty } from '../shared/utils'
 import { MailBox } from './MailBox'
-import type { StateRoute } from './r.types'
+import type { RuntimeOutbound, StateRoute } from './r.types'
 import { initRuntime, macrostep } from './runtime_step'
 import { readyAction } from './runtime_step.core'
 import { runtimeUtils } from './runtime_utils'
 
 export type RuntimeStatus = 'stopped' | 'active' | 'done' | 'error'
 
-type Observer<C extends MContext, O> = (current: Expand<Snapshot<C, O>>, prev: Expand<Snapshot<C, O>>) => void
 type Snapshot<C extends MContext, O> = {
   states: string[]
-  stateValue: string | string[]
+  stateValue: string | string[] | undefined
   context: Expand<X_RemovePrivateKeys<C>>
   c: Expand<X_RemovePrivateKeys<C>>
   runtimeStatus: RuntimeStatus
   output: O | undefined
+  _children: RuntimeOutbound<any>['children']
 }
-type RuntimeOption<I> = {
+
+type Observer<C extends MContext, O> = (current: Expand<Snapshot<C, O>>, prev: Expand<Snapshot<C, O>>) => void
+
+export type RuntimeOptions<I> = {
   id?: string
   input?: () => I
 }
@@ -37,6 +40,7 @@ type RuntimeOption<I> = {
 type X_RemovePrivateKeys<T extends Record<string, unknown>> = {
   [K in keyof T as K extends `_${string}` ? never : K]: T[K]
 }
+
 
 export function createRuntime<
   C extends MContext,
@@ -48,12 +52,12 @@ export function createRuntime<
   A extends Record<string, Placeholder>,
   S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
   const ND extends NormalizedDefinition,
->(machine: Machine<C, E, I, EM, O, G, A, S, ND>, option?: RuntimeOption<I>) {
+>(machine: Machine<C, E, I, EM, O, G, A, S, ND>, option?: RuntimeOptions<I>) {
   const runtime = new Runtime(machine, option)
   return runtime
 }
 
-class Runtime<
+export class Runtime<
   C extends MContext,
   E extends EventBody,
   I,
@@ -72,9 +76,13 @@ class Runtime<
   #crrStates: StateRoute = []
   #sentQueue: MailBox<E | InternalEventBody, InternalEPayload> = new MailBox(this.#processSentEvent.bind(this))
   #enqueueEvent = this.#sentQueue.enqueue.bind(this.#sentQueue)
+  #outbound: RuntimeOutbound<E> = {
+    enqueueEvent: this.#enqueueEvent,
+    children: {},
+  }
   #observers = new Set<Observer<C, O>>()
   #emittedListeners: Map<string, Set<(emittedEvent: EM) => void>> = new Map()
-  #snapshot: Snapshot<C, O> = { states: [], runtimeStatus: 'stopped' } as any
+  #snapshot = {} as Snapshot<C, O>
 
   get states() {
     return this.#snapshot.states
@@ -89,7 +97,7 @@ class Runtime<
     return this.#snapshot.runtimeStatus
   }
 
-  constructor(machine: Machine<C, E, I, EM, O, G, A, S, ND>, { id, input }: RuntimeOption<I> = {}) {
+  constructor(machine: Machine<C, E, I, EM, O, G, A, S, ND>, { id, input }: RuntimeOptions<I> = {}) {
     defineFixedProperty(this, 'id', id || `${machine.name}-${String(Date.now() % 10000000000).padStart(10, '0')}`, {
       enumerable: true,
     })
@@ -117,7 +125,7 @@ class Runtime<
       this.#emit,
       this.#crrStates,
       this.#machineInternal,
-      this.#enqueueEvent,
+      this.#outbound,
     )
 
     this.#buildAndSetSnapshot(context, hasTransitioned, 'active')(INIT_EVENT)
@@ -149,8 +157,28 @@ class Runtime<
     return this.#snapshot
   }
 
+  stop() {
+    if (this.#snapshot.runtimeStatus !== 'active') return this
+
+    this.#sentQueue.clear()
+    // TODO: 終了処理を mailbox を介して行う
+    {
+      const children = { ...this.#outbound.children }
+      for (const id in children) {
+        children[id]!.stop()
+        delete children[id]
+      }
+      this.#outbound.children = children
+    }
+    this.#buildAndSetSnapshot(this.#realContext, false, 'stopped')()
+    this.#observers.clear()
+    this.#emittedListeners.clear()
+
+    return this
+  }
+
   #processSentEvent<Ex extends E | InternalEventBody>(event: Ex, internalEPayload?: InternalEPayload) {
-    const { guards, actions, topLvDefItem } = this.#machineInternal
+    const { guards, actions } = this.#machineInternal
     const actionRunner = readyAction<C, E, I, EM, G, A, Ex>(
       this.#realContext,
       event,
@@ -166,8 +194,7 @@ class Runtime<
       this.#crrStates,
       actionRunner,
       this.#machineInternal,
-      this.#enqueueEvent,
-      topLvDefItem,
+      this.#outbound,
     )
     {
       const { context, crrStates, hasTransitioned } = result
@@ -191,16 +218,24 @@ class Runtime<
     }
   }
 
-  #buildAndSetSnapshot(realContext: C, hasTransitioned: boolean, runtimeStatus?: RuntimeStatus) {
+  #buildAndSetSnapshot(
+    newRealContext: C,
+    hasTransitioned: boolean,
+    runtimeStatus?: RuntimeStatus,
+  ) {
     const oldSnapshot = this.#snapshot
 
     const crrStates = this.#crrStates
-    const states = !hasTransitioned ? oldSnapshot.states : !crrStates.length ? [] : makeStateList(this.#crrStates, 0, '')
+    const states = !hasTransitioned
+      ? oldSnapshot.states
+      : !crrStates.length
+        ? []
+        : makeStateList(this.#crrStates, 0, '')
     let { context } = oldSnapshot
-    const contextUpdated = realContext !== this.#realContext
+    const contextUpdated = newRealContext !== this.#realContext
     if (contextUpdated) {
-      this.#realContext = realContext
-      context = Object.entries(realContext).reduce(
+      this.#realContext = newRealContext
+      context = Object.entries(newRealContext).reduce(
         (acc, [k, v]) => {
           if (!k.startsWith('_')) {
             acc[k as keyof X_RemovePrivateKeys<C>] = v
@@ -221,14 +256,15 @@ class Runtime<
       this.#snapshot = {
         states,
         get stateValue() {
-          return states.length === 1 ? states[0]! : states
+          return states.length <= 1 ? states[0] : states
         },
         context,
         c: context,
         runtimeStatus: isCompleted ? 'done' : runtimeStatus || oldSnapshot.runtimeStatus,
         output: !(isCompleted && output)
           ? undefined
-          : output(runtimeUtils.makeFnBaseParam(realContext, event, this.#input)),
+          : output(runtimeUtils.makeFnBaseParam(newRealContext, event, this.#input)),
+        _children: this.#outbound.children
       }
 
       {
@@ -240,17 +276,12 @@ class Runtime<
 
       if (isCompleted) {
         this.#sentQueue.clear()
-        this.#onComplete()
+        this.#observers.clear()
+        this.#emittedListeners.clear()
       }
     }
   }
-
-  #onComplete() {
-    this.#observers.clear()
-    this.#emittedListeners.clear()
-  }
 }
-
 
 function makeStateList(stateRoute: StateRoute, idx: number, parent: string) {
   if (idx >= stateRoute.length) return [parent]

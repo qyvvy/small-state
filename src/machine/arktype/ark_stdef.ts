@@ -1,6 +1,6 @@
 import { type } from 'arktype'
 import { EntrySymbol, ExitSymbol, InvokeSymbol } from '../m.types'
-import { SubStNormalizedDefinition } from './ark_normalized'
+import { ChildMachine, SubStNormalizedDefinition } from './ark_normalized'
 import { ActionElement, AnyFn } from './arktype.internal'
 
 const x_ActionEffects = type.or(ActionElement, ActionElement.array())
@@ -19,8 +19,6 @@ const ExitHookReturn = type([type.unit(ExitSymbol), AnyFn, 'null', x_ActionEffec
 const o_StDefMetaInfo = type({
   '+': 'reject',
   //'tags?': '(string > 0)[]',
-  //'entryHook?': ActionFuncs,
-  //'exitHook?': ActionFuncs,
   'final?': AnyFn.or('boolean'),
 })
 const o_SubStatesNormalized = type([AnyFn, SubStNormalizedDefinition]).readonly() // subStates|parallel
@@ -29,7 +27,7 @@ const o_Invocation = type([
   AnyFn,
   'null',
   { 'id?': 'string', 'input?': AnyFn },
-  type.or(AnyFn, 'string'),
+  type.or(AnyFn, 'string', ChildMachine),
   OnFnReturn.array(),
 ]).readonly()
 

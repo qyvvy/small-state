@@ -12,8 +12,9 @@ export type ChildDoneEventBody = { type: ':childDone:', output: unknown }
 export type ChildDoneEType = ChildDoneEventBody['type']
 export type BuiltinEType = ':always:' | ChildDoneEType
 
-export type InternalEType = BuiltinEType | `${string}/done` | `${string}/error`
+export type InternalEType = BuiltinEType | `invoke/done[${number}]` | `invoke/error[${number}]`
 export type InternalEventBody = { type: InternalEType;[key: string]: any }
+export type InternalEPayload = { path: string }
 
 export type MContext = Record<string, any>
 export type EventBody = { type: string;[key: string]: any }
@@ -86,13 +87,17 @@ export type NormalizedTransition = {
   actions: NormalizedAction[]
 }
 
+export type NormalizedSrc =
+  | { type: 'function', value: AnyFn }
+  | { type: 'string', value: string }
+  | { type: 'machine', value: Machine<any, any, any, any, any, any, any, any, any> }
+
 export type NormalizedInvocation = {
-  id: string
+  id?: string
   input?: AnyFn
-  src: AnyFn | string
+  src: NormalizedSrc
 }
 
-export type InternalEPayload = { path: string }
 type InternalEvent = {
   cond?: (payload: InternalEPayload) => boolean
   transitions: NormalizedTransition[]
@@ -152,8 +157,7 @@ export type UpdateFn<C extends MContext> = (updates: UpdateFnParam<C>) => unknow
 export type EmitFn<EM extends EmittedEvent> = (emittedEvent: EM) => unknown
 
 
-//export type ServiceOptions = { signal: AbortSignal } // TODO
-export type ServiceOptions = undefined
+export type ServiceOptions = { signal: AbortSignal }
 
 export type MachineConfig<
   C extends MContext,
@@ -195,8 +199,8 @@ export type Machine<
   name: string
   internal: {
     [MachineSymbol]: true
-    initContext?: (input: I) => C
-    output?: (arg: FnBaseParams<C, E, I, unknown>[0]) => O // マシンが最終状態になったときに実行される
+    initContext: undefined | ((input: I) => C)
+    output: undefined | ((arg: FnBaseParams<C, E, I, unknown>[0]) => O) // マシンが最終状態になったときに実行される
     guards: { [K in keyof G]: (arg: FnBaseParams<C, E | InternalEventBody, I>[0], params: G[K]) => boolean }
     actions: {
       [K in keyof A]: (arg: LimitedActionFnParams<C, E | InternalEventBody, I, EM>[0], params: A[K]) => unknown

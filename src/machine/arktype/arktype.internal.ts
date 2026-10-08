@@ -1,6 +1,7 @@
 import { type } from 'arktype'
 
 export const AnyFn = type('Function').narrow((f): f is (...args: any[]) => any => true)
+export const FunctionRecord = type({ '[string]': AnyFn })
 
 const SingleRecord = type({ '[string]': 'unknown' })
   .narrow((value) => Object.keys(value).length === 1)

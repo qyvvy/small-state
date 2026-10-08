@@ -251,14 +251,16 @@ describe('rt_main/basic', () => {
         c: { failedAttempts: 0 },
         runtimeStatus: 'active',
         output: undefined,
+        _children: {},
       })
       expect(mockCalls[0]![1]).toEqual({
         states: [],
-        stateValue: [],
+        stateValue: undefined,
         context: { failedAttempts: 0 },
         c: { failedAttempts: 0 },
         runtimeStatus: 'stopped',
         output: undefined,
+        _children: {},
       })
 
       expect(mockCalls[1]![0]).toEqual({
@@ -268,6 +270,7 @@ describe('rt_main/basic', () => {
         c: { failedAttempts: 1 },
         runtimeStatus: 'active',
         output: undefined,
+        _children: {},
       })
       // states と context は変更があるときだけ別の実体になる
       expect(mockCalls[1]![0].states).toBe(mockCalls[1]![1].states)
@@ -280,6 +283,7 @@ describe('rt_main/basic', () => {
         c: { failedAttempts: 2 },
         runtimeStatus: 'active',
         output: undefined,
+        _children: {},
       })
       expect(mockCalls[2]![0].states).toBe(mockCalls[2]![1].states)
       expect(mockCalls[2]![0].context).not.toBe(mockCalls[2]![1].context)
@@ -291,6 +295,7 @@ describe('rt_main/basic', () => {
         c: { failedAttempts: 3 },
         runtimeStatus: 'done',
         output: undefined,
+        _children: {},
       })
       expect(mockCalls[3]![0].states).not.toBe(mockCalls[3]![1].states)
       expect(mockCalls[3]![0].context).not.toBe(mockCalls[3]![1].context)

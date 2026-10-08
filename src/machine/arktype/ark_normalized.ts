@@ -1,5 +1,6 @@
 import { type } from 'arktype'
-import { ActionElement, AnyFn } from './arktype.internal'
+import { MachineSymbol, type NormalizedStateItemBoth } from '../m.types'
+import { ActionElement, AnyFn, FunctionRecord } from './arktype.internal'
 
 const NormalizedActions = ActionElement.array()
 
@@ -10,17 +11,39 @@ const x_NormalizedTransitions = type({
   guards: NormalizedActions,
 }).array()
 
-const o_NormalizedInvocations = type({
-  'id': 'string',
-  'input?': AnyFn,
-  src: type.or(AnyFn, 'string'),
-  'done?': x_NormalizedTransitions,
-  'error?': x_NormalizedTransitions,
-}).array()
-const o_InternalEvent = type({
+const x_InternalEvent = type({
   'cond?': AnyFn,
   transitions: x_NormalizedTransitions,
 })
+
+export const ChildMachine = type({
+  name: 'string',
+  provide: AnyFn,
+  internal: {
+    [MachineSymbol]: 'true',
+    initContext: AnyFn.or('undefined'),
+    output: AnyFn.or('undefined'),
+    guards: FunctionRecord,
+    actions: FunctionRecord,
+    services: FunctionRecord,
+    definition: 'unknown',
+    topLvDefItem: {
+      events: type({ '[string]': x_NormalizedTransitions }),
+      internalEvents: type({ '[string]': x_InternalEvent }),
+    },
+    stateCatalog: type.instanceOf(Map).as<Map<string, NormalizedStateItemBoth>>(),
+  },
+})
+
+const o_NormalizedInvocations = type({
+  'id?': 'string',
+  'input?': AnyFn,
+  src: type.or(
+    { type: '"function"', value: AnyFn },
+    { type: '"string"', value: 'string' },
+    { type: '"machine"', value: ChildMachine }
+  ),
+}).array()
 const NStateItemDef = type({
   '+': 'reject',
   pPath: 'string',
@@ -29,7 +52,7 @@ const NStateItemDef = type({
   entryHooks: NormalizedActions.or('null'),
   exitHooks: NormalizedActions.or('null'),
   invocations: o_NormalizedInvocations,
-  internalEvents: { '[string]': o_InternalEvent },
+  internalEvents: { '[string]': x_InternalEvent },
   events: { '[string]': x_NormalizedTransitions },
 })
 
@@ -55,3 +78,4 @@ export const SubStNormalizedDefinition = type([
     },
   },
 ])
+
