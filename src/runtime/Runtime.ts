@@ -80,6 +80,7 @@ export class Runtime<
     enqueueEvent: this.#enqueueEvent,
     children: {},
   }
+  #emit = this.#_emit.bind(this)
   #observers = new Set<Observer<C, O>>()
   #emittedListeners: Map<string, Set<(emittedEvent: EM) => void>> = new Map()
   #snapshot = {} as Snapshot<C, O>
@@ -122,9 +123,9 @@ export class Runtime<
     const { context, hasTransitioned } = initRuntime(
       this.#realContext,
       this.#input,
-      this.#emit,
       this.#crrStates,
       this.#machineInternal,
+      this.#emit,
       this.#outbound,
     )
 
@@ -204,7 +205,7 @@ export class Runtime<
     }
   }
 
-  #emit(emittedEvent: EM) {
+  #_emit(emittedEvent: EM) {
     const listeners = this.#emittedListeners.get(emittedEvent.type)
     if (!listeners) {
       return

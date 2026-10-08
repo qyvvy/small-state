@@ -176,7 +176,7 @@ describe('rt_main/basic', () => {
     const loginMachine = createMachine(
       {
         types: {
-          events: {} as { type: 'LOGIN_FAILED' } | { type: 'LOGIN_SUCCESS' },
+          events: {} as { type: 'LOGIN_FAILED' } | { type: 'LOGIN_SUCCESS' } | { type: 'UNLOCK' },
         },
         initContext: () => ({ failedAttempts: 0 }),
       },
@@ -194,7 +194,12 @@ describe('rt_main/basic', () => {
           ]),
           on('LOGIN_SUCCESS', { to: 'loggedIn' }),
         ],
-        locked: null,
+        locked: [
+          on('UNLOCK', {
+            to: 'idle',
+            actions: ({ update }) => update({ failedAttempts: 0 }),
+          }),
+        ],
         loggedIn: null,
       }),
     )
@@ -222,7 +227,7 @@ describe('rt_main/basic', () => {
       loginRt.send('LOGIN_FAILED')
       expect(loginRt.states).toEqual(['/locked'])
       expect(loginRt.context.failedAttempts).toBe(3)
-      expect(loginRt.runtimeStatus).toBe('done')
+      expect(loginRt.runtimeStatus).toBe('active')
     })
 
     test('4: observer', async () => {
@@ -293,7 +298,7 @@ describe('rt_main/basic', () => {
         stateValue: '/locked',
         context: { failedAttempts: 3 },
         c: { failedAttempts: 3 },
-        runtimeStatus: 'done',
+        runtimeStatus: 'active',
         output: undefined,
         _children: {},
       })

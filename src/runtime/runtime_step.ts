@@ -64,9 +64,9 @@ export function initRuntime<
 >(
   realContext: C,
   input: I,
-  emit: EmitFn<EM>,
   crrStates: StateRoute,
   machineInternal: Machine<C, E, I, EM, any, G, A, any, ND>['internal'],
+  emit: EmitFn<EM>,
   rtOutbound: RuntimeOutbound<E>,
   event: E = { type: ':init:' } as E,
 ) {
@@ -325,9 +325,9 @@ function exitAndEntry<
     } catch (err) {
       const pth = ST_DELIM + fullToSplittees[i]?.join(ST_DELIM)
       if (!(err instanceof Error)) {
-        throw new Error(`Unknown error occurred during entry "${pth}", exitHooks[${j!}]: ${String(err)}`)
+        throw new Error(`Unknown error occurred during entry "${pth}", entryHooks[${j!}]: ${String(err)}`)
       }
-      throw new Error(`Error occurred during entry "${pth}", exitHooks[${i!}]`, { cause: err })
+      throw new Error(`Error occurred during entry "${pth}", entryHooks[${i!}]`, { cause: err })
     }
     internalQueue.push(...genChildDoneEvents(accReachedFinal, makeFnBaseParam(), crrStates, stateCatalog))
   }

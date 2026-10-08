@@ -330,7 +330,7 @@ export function readyAction<
     ...args: ParamsInputArgsOf<A, Ak, C, Ex, I>
   ) {
     if (isProcessingQueue) {
-      throw new Error(`Cannot enqueue while processing the queue.`)
+      throw new Error('Nested enqueue operations are not supported.')
     }
     const [fn, params] = resolveActionElement<C, Ex, I, EM>(type, machineActions, args?.[0])
     enqueuees.push({ fn, params })
