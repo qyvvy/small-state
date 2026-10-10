@@ -1,19 +1,15 @@
 import type {
-  EmittedEvent,
-  EventBody,
   InternalEPayload,
   InternalEventBody,
   Machine,
   MContext,
-  NormalizedDefinition,
   PureETypeString,
-  ServiceOptions,
 } from '../machine/m.types'
 import { ST_DELIM } from '../shared/constants'
-import type { Expand, Placeholder } from '../shared/general.types'
+import type { Expand } from '../shared/general.types'
 import { defineFixedProperty } from '../shared/utils'
 import { MailBox } from './MailBox'
-import type { RuntimeOutbound, StateRoute } from './r.types'
+import type { InferredMachineTypes, InputFromMachine, RuntimeOutbound, StateRoute } from './r.types'
 import { initRuntime, macrostep } from './runtime_step'
 import { readyAction } from './runtime_step.core'
 import { runtimeUtils } from './runtime_utils'
@@ -43,47 +39,41 @@ type X_RemovePrivateKeys<T extends Record<string, unknown>> = {
 
 
 export function createRuntime<
-  C extends MContext,
-  E extends EventBody,
-  I,
-  const EM extends EmittedEvent,
-  O,
-  G extends Record<string, Placeholder>,
-  A extends Record<string, Placeholder>,
-  S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
-  const ND extends NormalizedDefinition,
->(machine: Machine<C, E, I, EM, O, G, A, S, ND>, option?: RuntimeOptions<I>) {
+  M extends Machine<any, any, any, any, any, any, any, any, any>,
+>(machine: M, option?: RuntimeOptions<InputFromMachine<M>>) {
   const runtime = new Runtime(machine, option)
   return runtime
 }
 
+
+type C<Mt extends InferredMachineTypes<any>> = Mt['C']
+type E<Mt extends InferredMachineTypes<any>> = Mt['E']
+type I<Mt extends InferredMachineTypes<any>> = Mt['I']
+type EM<Mt extends InferredMachineTypes<any>> = Mt['EM']
+type O<Mt extends InferredMachineTypes<any>> = Mt['O']
+type G<Mt extends InferredMachineTypes<any>> = Mt['G']
+type A<Mt extends InferredMachineTypes<any>> = Mt['A']
+
 export class Runtime<
-  C extends MContext,
-  E extends EventBody,
-  I,
-  EM extends EmittedEvent,
-  O,
-  G extends Record<string, Placeholder>,
-  A extends Record<string, Placeholder>,
-  S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
-  const ND extends NormalizedDefinition,
+  M extends Machine<any, any, any, any, any, any, any, any, any>,
+  Mt extends InferredMachineTypes<M> = InferredMachineTypes<M>,
 > {
   readonly id!: string
-  readonly machine!: Machine<C, E, I, EM, O, G, A, S, ND>
-  readonly #machineInternal!: Machine<C, E, I, EM, O, G, A, S, ND>['internal']
-  readonly #input!: I
-  #realContext!: C
+  readonly machine!: Mt['M']
+  readonly #machineInternal!: Mt['M']['internal']
+  readonly #input!: I<Mt>
+  #realContext!: C<Mt>
   #crrStates: StateRoute = []
-  #sentQueue: MailBox<E | InternalEventBody, InternalEPayload> = new MailBox(this.#processSentEvent.bind(this))
+  #sentQueue: MailBox<E<Mt> | InternalEventBody, InternalEPayload> = new MailBox(this.#processSentEvent.bind(this))
   #enqueueEvent = this.#sentQueue.enqueue.bind(this.#sentQueue)
-  #outbound: RuntimeOutbound<E> = {
+  #outbound: RuntimeOutbound<E<Mt>> = {
     enqueueEvent: this.#enqueueEvent,
     children: {},
   }
   #emit = this.#_emit.bind(this)
-  #observers = new Set<Observer<C, O>>()
-  #emittedListeners: Map<string, Set<(emittedEvent: EM) => void>> = new Map()
-  #snapshot = {} as Snapshot<C, O>
+  #observers = new Set<Observer<C<Mt>, O<Mt>>>()
+  #emittedListeners: Map<string, Set<(emittedEvent: EM<Mt>) => void>> = new Map()
+  #snapshot = {} as Snapshot<C<Mt>, O<Mt>>
   #isStarted = false
 
   get states() {
@@ -99,20 +89,20 @@ export class Runtime<
     return this.#snapshot.runtimeStatus
   }
 
-  constructor(machine: Machine<C, E, I, EM, O, G, A, S, ND>, { id, input }: RuntimeOptions<I> = {}) {
-    defineFixedProperty(this, 'id', id || `${machine.name}-${String(Date.now() % 10000000000).padStart(10, '0')}`, {
+  constructor(machine: M, { id, input }: RuntimeOptions<I<Mt>> = {}) {
+    defineFixedProperty(this, 'id', id || `${machine.name}-${String(Date.now() % 10_000_000_000).padStart(10, '0')}`, {
       enumerable: true,
     })
     defineFixedProperty(this, 'machine', machine, { enumerable: true })
     this.#machineInternal = machine.internal
-    this.#input = input?.() as I
+    this.#input = input?.() as I<Mt>
 
     const { initContext } = machine.internal
-    const context = initContext ? initContext(this.#input) : (undefined as any as C)
+    const context = initContext ? initContext(this.#input) : (undefined as any as C<Mt>)
     this.#buildAndSetSnapshot(context, true, 'stopped')()
   }
 
-  subscribe(observer: Observer<C, O>) {
+  subscribe(observer: Observer<C<Mt>, O<Mt>>) {
     this.#observers.add(observer)
     return () => this.#observers.delete(observer)
   }
@@ -121,7 +111,7 @@ export class Runtime<
     if (this.#isStarted) return this
     this.#isStarted = true
     this.#sentQueue.start()
-    const INIT_EVENT = { type: ':init:' } as E
+    const INIT_EVENT = { type: ':init:' } as E<Mt>
 
     const { context, hasTransitioned } = initRuntime(
       this.#realContext,
@@ -136,19 +126,19 @@ export class Runtime<
     return this
   }
 
-  send(event: E | PureETypeString<E>) {
-    const eventObj = (typeof event === 'string' ? { type: event } : event) as E
+  send(event: E<Mt> | PureETypeString<E<Mt>>) {
+    const eventObj = (typeof event === 'string' ? { type: event } : event) as E<Mt>
     this.#enqueueEvent(eventObj)
     return this
   }
 
-  on(emittedEventType: EM['type'], handler: (emittedEvent: EM) => void) {
+  on(emittedEventType: EM<Mt>['type'], handler: (emittedEvent: EM<Mt>) => void) {
     let listeners = this.#emittedListeners.get(emittedEventType)
     if (!listeners) {
       listeners = new Set()
       this.#emittedListeners.set(emittedEventType, listeners)
     }
-    const handlerWrapper = (emittedEvent: EM) => handler(emittedEvent)
+    const handlerWrapper = (emittedEvent: EM<Mt>) => handler(emittedEvent)
     listeners.add(handlerWrapper)
     return {
       unsubscribe: () => {
@@ -181,9 +171,9 @@ export class Runtime<
     return this
   }
 
-  #processSentEvent<Ex extends E | InternalEventBody>(event: Ex, internalEPayload?: InternalEPayload) {
+  #processSentEvent<Ex extends E<Mt> | InternalEventBody>(event: Ex, internalEPayload?: InternalEPayload) {
     const { guards, actions } = this.#machineInternal
-    const actionRunner = readyAction<C, E, I, EM, G, A, Ex>(
+    const actionRunner = readyAction<C<Mt>, E<Mt>, I<Mt>, EM<Mt>, G<Mt>, A<Mt>, Ex>(
       this.#realContext,
       event,
       this.#input,
@@ -197,18 +187,18 @@ export class Runtime<
       internalEPayload,
       this.#crrStates,
       actionRunner,
-      this.#machineInternal,
+      this.#machineInternal as any,
       this.#outbound,
     )
     {
       const { context, crrStates, hasTransitioned } = result
       this.#crrStates = crrStates
 
-      this.#buildAndSetSnapshot(context, hasTransitioned)(event as E)
+      this.#buildAndSetSnapshot(context, hasTransitioned)(event as E<Mt>)
     }
   }
 
-  #_emit(emittedEvent: EM) {
+  #_emit(emittedEvent: EM<Mt>) {
     const listeners = this.#emittedListeners.get(emittedEvent.type)
     if (!listeners) {
       return
@@ -223,7 +213,7 @@ export class Runtime<
   }
 
   #buildAndSetSnapshot(
-    newRealContext: C,
+    newRealContext: C<Mt>,
     hasTransitioned: boolean,
     runtimeStatus?: RuntimeStatus,
   ) {
@@ -242,19 +232,19 @@ export class Runtime<
       context = Object.entries(newRealContext).reduce(
         (acc, [k, v]) => {
           if (!k.startsWith('_')) {
-            acc[k as keyof X_RemovePrivateKeys<C>] = v
+            acc[k as keyof X_RemovePrivateKeys<C<Mt>>] = v
           }
           return acc
         },
-        {} as X_RemovePrivateKeys<C>,
+        {} as X_RemovePrivateKeys<C<Mt>>,
       )
     }
 
-    return (event: E = {} as E) => {
+    return (event: E<Mt> = {} as E<Mt>) => {
       if (!(hasTransitioned || contextUpdated || runtimeStatus)) {
         return
       }
-      const { stateCatalog, output } = this.machine.internal
+      const { stateCatalog, output } = this.#machineInternal
       const isCompleted = !states.length ? false : states.every((stPath) => stateCatalog.get(stPath)?.def.final)
 
       this.#snapshot = {

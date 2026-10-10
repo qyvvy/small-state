@@ -306,7 +306,7 @@ describe('rt_main_invoke', () => {
 
     test('0:state に入ると子マシンが起動し、_children から id で参照できる', async () => {
       const rt = createRuntime(makeParent()).start()
-      const child = rt.getSnapshot()._children.CHILD! as Runtime<any, any, any, any, any, any, any, any, any>
+      const child = rt.getSnapshot()._children.CHILD! as Runtime<any>
       expect(rt.stateValue).toBe('/running')
 
       child.send({ type: 'inc' })
@@ -333,7 +333,7 @@ describe('rt_main_invoke', () => {
 
     test('0:親が state を抜けると子マシンが stop される', async () => {
       const rt = createRuntime(makeParent()).start()
-      const child = rt.getSnapshot()._children.CHILD! as Runtime<any, any, any, any, any, any, any, any, any>
+      const child = rt.getSnapshot()._children.CHILD! as Runtime<any>
       rt.send({ type: 'abort' })
 
       expect(child.runtimeStatus).toBe('stopped')
@@ -342,7 +342,7 @@ describe('rt_main_invoke', () => {
 
     test('0:停止した子に送ったイベントは親に影響しない', async () => {
       const rt = createRuntime(makeParent()).start()
-      const child = rt.getSnapshot()._children.CHILD! as Runtime<any, any, any, any, any, any, any, any, any>
+      const child = rt.getSnapshot()._children.CHILD! as Runtime<any>
       rt.send({ type: 'abort' })
 
       child.send({ type: 'finish' })
@@ -351,7 +351,7 @@ describe('rt_main_invoke', () => {
 
     test('0:親を stop すると子も stop される', async () => {
       const rt = createRuntime(makeParent()).start()
-      const child = rt.getSnapshot()._children.CHILD! as Runtime<any, any, any, any, any, any, any, any, any>
+      const child = rt.getSnapshot()._children.CHILD! as Runtime<any>
       rt.stop()
       expect(child.runtimeStatus).toBe('stopped')
     })
