@@ -84,6 +84,7 @@ export class Runtime<
   #observers = new Set<Observer<C, O>>()
   #emittedListeners: Map<string, Set<(emittedEvent: EM) => void>> = new Map()
   #snapshot = {} as Snapshot<C, O>
+  #isStarted = false
 
   get states() {
     return this.#snapshot.states
@@ -117,6 +118,8 @@ export class Runtime<
   }
 
   start() {
+    if (this.#isStarted) return this
+    this.#isStarted = true
     this.#sentQueue.start()
     const INIT_EVENT = { type: ':init:' } as E
 
