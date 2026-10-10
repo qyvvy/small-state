@@ -172,6 +172,70 @@ describe('rt_main/basic', () => {
     })
   })
 
+  describe('停止したマシンは動かせない確認', () => {
+    const machine = createMachine({
+      name: 'counter',
+      initContext: () => ({ count: 0 })
+    }, ({ on }) => ({
+      active: [
+        on('inc', { actions: ({ update, c }) => update({ count: c.count + 1 }) }),
+        on('finish', { to: 'done' }),
+      ],
+      done: null,
+    }))
+
+    test('0:start 前に send しても何も起こらない', async () => {
+      const rt = createRuntime(machine)
+      expect(rt.runtimeStatus).toBe('stopped')
+      expect(rt.stateValue).toBeUndefined()
+      rt.send({ type: 'inc' })
+      expect(rt.runtimeStatus).toBe('stopped')
+      expect(rt.context.count).toBe(0)
+      expect(rt.stateValue).toBeUndefined()
+    })
+
+    test('0:stop 後に send しても何も起こらない', async () => {
+      const rt = createRuntime(machine).start()
+      rt.stop()
+      expect(rt.runtimeStatus).toBe('stopped')
+      const snapshotBefore = rt.getSnapshot()
+      rt.send({ type: 'inc' })
+      expect(rt.getSnapshot()).toBe(snapshotBefore)
+      expect(rt.context.count).toBe(0)
+      expect(rt.stateValue).toBe('/active')
+    })
+
+    test('0:stop したものを 再 start できない', async () => {
+      const rt = createRuntime(machine).start()
+      rt.stop()
+      expect(rt.runtimeStatus).toBe('stopped')
+      rt.start()
+      expect(rt.runtimeStatus).toBe('stopped')
+    })
+
+    test('0:done 後に send しても何も起こらない', async () => {
+      const rt = createRuntime(machine).start()
+      rt.send({ type: 'finish' })
+      expect(rt.stateValue).toBe('/done')
+      expect(rt.runtimeStatus).toBe('done')
+      const snapshotBefore = rt.getSnapshot()
+      rt.send({ type: 'inc' })
+      expect(rt.getSnapshot()).toBe(snapshotBefore)
+      expect(rt.context.count).toBe(0)
+      expect(rt.stateValue).toBe('/done')
+      expect(rt.runtimeStatus).toBe('done')
+    })
+
+    test('0:done したものを 再 start できない', async () => {
+      const rt = createRuntime(machine).start()
+      rt.send({ type: 'finish' })
+      expect(rt.runtimeStatus).toBe('done')
+      rt.start()
+      expect(rt.runtimeStatus).toBe('done')
+    })
+
+  })
+
   describe('guard と actins の確認', () => {
     const loginMachine = createMachine(
       {

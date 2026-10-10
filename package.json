@@ -1,6 +1,6 @@
 {
   "name": "small-state",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "A state machine inspired by XState.",
   "author": "qyvvy",
   "license": "MIT",

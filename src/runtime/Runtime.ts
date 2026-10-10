@@ -127,28 +127,10 @@ export class Runtime<
   }
 
   send(event: E<Mt> | PureETypeString<E<Mt>>) {
+    if (this.#snapshot.runtimeStatus !== 'active') return this
     const eventObj = (typeof event === 'string' ? { type: event } : event) as E<Mt>
     this.#enqueueEvent(eventObj)
     return this
-  }
-
-  on(emittedEventType: EM<Mt>['type'], handler: (emittedEvent: EM<Mt>) => void) {
-    let listeners = this.#emittedListeners.get(emittedEventType)
-    if (!listeners) {
-      listeners = new Set()
-      this.#emittedListeners.set(emittedEventType, listeners)
-    }
-    const handlerWrapper = (emittedEvent: EM<Mt>) => handler(emittedEvent)
-    listeners.add(handlerWrapper)
-    return {
-      unsubscribe: () => {
-        listeners.delete(handlerWrapper)
-      },
-    }
-  }
-
-  getSnapshot() {
-    return this.#snapshot
   }
 
   stop() {
@@ -169,6 +151,25 @@ export class Runtime<
     this.#emittedListeners.clear()
 
     return this
+  }
+
+  on(emittedEventType: EM<Mt>['type'], handler: (emittedEvent: EM<Mt>) => void) {
+    let listeners = this.#emittedListeners.get(emittedEventType)
+    if (!listeners) {
+      listeners = new Set()
+      this.#emittedListeners.set(emittedEventType, listeners)
+    }
+    const handlerWrapper = (emittedEvent: EM<Mt>) => handler(emittedEvent)
+    listeners.add(handlerWrapper)
+    return {
+      unsubscribe: () => {
+        listeners.delete(handlerWrapper)
+      },
+    }
+  }
+
+  getSnapshot() {
+    return this.#snapshot
   }
 
   #processSentEvent<Ex extends E<Mt> | InternalEventBody>(event: Ex, internalEPayload?: InternalEPayload) {
