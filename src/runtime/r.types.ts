@@ -2,8 +2,7 @@ import type { EventBody, InternalEPayload, InternalEventBody } from '../machine/
 import type { Runtime } from './Runtime';
 
 export type StateRoute = Array<
-  // biome-ignore lint/complexity/noBannedTypes: WeakRef の対象にするためにリテラル文字列ではなく文字列オブジェクトを使う
-  | String
+  | string
   | { parallel: string; regions: { [key: string]: StateRoute }; output?: unknown }
 >
 

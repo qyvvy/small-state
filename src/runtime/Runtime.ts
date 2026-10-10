@@ -287,7 +287,7 @@ export class Runtime<
 function makeStateList(stateRoute: StateRoute, idx: number, parent: string) {
   if (idx >= stateRoute.length) return [parent]
   const el = stateRoute[idx]!
-  if (!('parallel' in el)) {
+  if (typeof el === 'string') {
     return makeStateList(stateRoute, idx + 1, `${parent}${ST_DELIM}${el}`)
   }
   const { parallel, regions } = el

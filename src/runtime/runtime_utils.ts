@@ -122,7 +122,7 @@ export function traverseStateRouteMatch(
     const routeEl = focusedRoute[routeIdx]
     if (!routeEl) {
       return { isExhausted: false, endIdx: i, remaining: [focusedRoute, routeIdx] }
-    } else if (!('parallel' in routeEl)) {
+    } else if (typeof routeEl === 'string') {
       if (sName !== routeEl.valueOf()) {
         return { isExhausted: false, endIdx: i, remaining: [focusedRoute, routeIdx] }
       }

@@ -202,7 +202,7 @@ function x_findDeepestTransitions(
     return [[], []]
   }
   const stateNameOrParallel = stateRoute[idx]!
-  if (!('parallel' in stateNameOrParallel)) {
+  if (typeof stateNameOrParallel === 'string') {
     return o_findChildOrSelfTransition(
       `${parentPath}${ST_DELIM}${stateNameOrParallel}`,
       stateRoute,
@@ -488,7 +488,7 @@ function* o_genExitPaths(
 ): Generator<string> {
   if (idx >= stateRoute.length) return
   const el = stateRoute[idx]!
-  if (!('parallel' in el)) {
+  if (typeof el === 'string') {
     const pth = `${parent}${ST_DELIM}${el}`
     yield* o_genExitPaths(pth, stateRoute, idx + 1)
     yield pth
@@ -516,7 +516,7 @@ export function* genExitPathsAndDeleteFromCrrStates(crrStates: StateRoute, lca: 
 
   if (!asRootpath) {
     stateRoute.splice(startIdx)
-  } else if ('regions' in stateRoute[startIdx]!) {
+  } else if (typeof stateRoute[startIdx] === 'object') {
     stateRoute[startIdx].regions = {}
   } else {
     throw new Error(`Internal error: unexpected stateRoute: ${JSON.stringify(stateRoute)}, lca:${lca}`)
@@ -576,7 +576,7 @@ function* o_genStateEntryData(
       if (isParallel) {
         const { route } = target as Extract<Parameters<typeof o_genStateEntryData>[1], { isRegions: false }>
         const el = route[rIdx]
-        if (el && 'parallel' in el && el.parallel === dKey) {
+        if (typeof el === 'object' && 'parallel' in el && el.parallel === dKey) {
           oo_addParallelToDestTree(childTree, sub.stateOf, el.regions)
           yield* o_genStateEntryData(childTree, { isRegions: true, regions: el.regions }, rIdx, sub)
           continue
@@ -626,8 +626,7 @@ function* o_genStateEntryData(
       }
     } else {
       const { route, isRegionChild } = target
-      const el = Object(dKey)
-      route.push(el)
+      route.push(dKey)
       yield [def, { stateName: dKey, isRegionChild }]
       if (sub) {
         yield* o_genStateEntryData(childTree, { isRegions: false, route, isRegionChild: false }, -1, sub)
@@ -746,7 +745,7 @@ function o_gatherAllChildrenOutputs<C extends MContext, Ex extends EventBody, I>
     const regionChild = regions[key]![0]
     if (!regionChild) {
       continue
-    } else if ('parallel' in regionChild) {
+    } else if (typeof regionChild === 'object') {
       const result = regionChild.output
       if (!result) return null
       output[key] = result

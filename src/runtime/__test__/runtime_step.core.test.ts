@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, jest, mock, test } from 'bun:test'
 import type { NormalizedDefinition, NormalizedStateItemBoth, TopLvStDefItem } from '../../machine/m.types'
+import type { StateRoute } from '../r.types'
 import {
   __test__,
   deriveEventTransition,
@@ -8,7 +9,6 @@ import {
   updateStateRouteForEntry,
 } from '../runtime_step.core'
 import { runtimeUtils } from '../runtime_utils'
-import { objectifyRouteString } from './helper'
 
 const { x_removeConflictedTransitions, x_findDeepestTransitions, o_deriveLowestCommonAncestor } = __test__
 
@@ -227,43 +227,40 @@ describe('runtime_step.core', () => {
     // 第二引数で示したパスより下位のパスを stateRoute から削除しそれらのパスを深いところから順に yield する
     describe('非parallel', () => {
       test('0:lcaがルートのとき("/" でなくて "" と指定)', async () => {
-        const stateRoute = objectifyRouteString(['a', 'ab', 'abc'])
+        const stateRoute = ['a', 'ab', 'abc']
         const result = genExitPathsAndDeleteFromCrrStates(stateRoute, '')
         expect([...result]).toEqual(['/a/ab/abc', '/a/ab', '/a'])
         expect(stateRoute).toEqual([])
       })
 
       test('0:', async () => {
-        const stateRoute = objectifyRouteString(['a', 'ab', 'abc'])
+        const stateRoute = ['a', 'ab', 'abc']
         const result = genExitPathsAndDeleteFromCrrStates(stateRoute, '/a')
         expect([...result]).toEqual(['/a/ab/abc', '/a/ab'])
-        expect(stateRoute).toEqual([Object('a')])
+        expect(stateRoute).toEqual(['a'])
       })
 
       test('0:', async () => {
-        const stateRoute = objectifyRouteString(['a', 'ab', 'abc'])
+        const stateRoute = ['a', 'ab', 'abc']
         const result = genExitPathsAndDeleteFromCrrStates(stateRoute, '/a/ab/abc')
         expect([...result]).toEqual([])
-        expect(stateRoute).toEqual(objectifyRouteString(['a', 'ab', 'abc']))
+        expect(stateRoute).toEqual(['a', 'ab', 'abc'])
       })
 
       test('0:lca が route を超えると例外を投げる', async () => {
-        const stateRoute = objectifyRouteString(['a', 'ab', 'abc'])
+        const stateRoute = ['a', 'ab', 'abc']
         expect(() => [...genExitPathsAndDeleteFromCrrStates(stateRoute, '/a/ab/abc/abcd')]).toThrow(/is not found/)
       })
 
       test('0:lca が route に見つからないと例外を投げる', async () => {
-        const stateRoute = objectifyRouteString(['a', 'ab', 'abc'])
+        const stateRoute = ['a', 'ab', 'abc']
         expect(() => [...genExitPathsAndDeleteFromCrrStates(stateRoute, '/a/x')]).toThrow(/is not found/)
       })
     })
 
     describe('parallel', () => {
       test('1:', async () => {
-        const stateRoute = objectifyRouteString([
-          'a',
-          { parallel: 'ab', regions: { ab1: ['ab1a', 'ab1ab'], ab2: [], ab3: ['ab3b'] } },
-        ])
+        const stateRoute = ['a', { parallel: 'ab', regions: { ab1: ['ab1a', 'ab1ab'], ab2: [], ab3: ['ab3b'] } }]
         const result = genExitPathsAndDeleteFromCrrStates(stateRoute, '/a')
         expect([...result]).toEqual([
           '/a/ab/ab1/ab1a/ab1ab',
@@ -274,14 +271,11 @@ describe('runtime_step.core', () => {
           '/a/ab/ab3',
           '/a/ab',
         ])
-        expect(stateRoute).toEqual(objectifyRouteString(['a']))
+        expect(stateRoute).toEqual(['a'])
       })
 
       test('2:parallelを指定', async () => {
-        const stateRoute = objectifyRouteString([
-          'a',
-          { parallel: 'ab', regions: { ab1: ['ab1a', 'ab1ab'], ab2: [], ab3: ['ab3b'] } },
-        ])
+        const stateRoute = ['a', { parallel: 'ab', regions: { ab1: ['ab1a', 'ab1ab'], ab2: [], ab3: ['ab3b'] } }]
         const result = genExitPathsAndDeleteFromCrrStates(stateRoute, '/a/ab')
         expect([...result]).toEqual([
           '/a/ab/ab1/ab1a/ab1ab',
@@ -291,31 +285,21 @@ describe('runtime_step.core', () => {
           '/a/ab/ab3/ab3b',
           '/a/ab/ab3',
         ])
-        expect(stateRoute).toEqual(objectifyRouteString(['a', { parallel: 'ab', regions: {} }]))
+        expect(stateRoute).toEqual(['a', { parallel: 'ab', regions: {} as any }])
       })
 
       test('3:regionを指定', async () => {
-        const stateRoute = objectifyRouteString([
-          'a',
-          { parallel: 'ab', regions: { ab1: ['ab1a', 'ab1ab'], ab2: [], ab3: ['ab3b'] } },
-        ])
+        const stateRoute = ['a', { parallel: 'ab', regions: { ab1: ['ab1a', 'ab1ab'], ab2: [], ab3: ['ab3b'] } }]
         const result = genExitPathsAndDeleteFromCrrStates(stateRoute, '/a/ab/ab1')
         expect([...result]).toEqual(['/a/ab/ab1/ab1a/ab1ab', '/a/ab/ab1/ab1a'])
-        expect(stateRoute).toEqual(
-          objectifyRouteString(['a', { parallel: 'ab', regions: { ab1: [], ab2: [], ab3: ['ab3b'] } }]),
-        )
+        expect(stateRoute).toEqual(['a', { parallel: 'ab', regions: { ab1: [], ab2: [], ab3: ['ab3b'] } }])
       })
 
       test('4:regionの子を指定', async () => {
-        const stateRoute = objectifyRouteString([
-          'a',
-          { parallel: 'ab', regions: { ab1: ['ab1a', 'ab1ab'], ab2: [], ab3: ['ab3b'] } },
-        ])
+        const stateRoute = ['a', { parallel: 'ab', regions: { ab1: ['ab1a', 'ab1ab'], ab2: [], ab3: ['ab3b'] } }]
         const result = genExitPathsAndDeleteFromCrrStates(stateRoute, '/a/ab/ab1/ab1a')
         expect([...result]).toEqual(['/a/ab/ab1/ab1a/ab1ab'])
-        expect(stateRoute).toEqual(
-          objectifyRouteString(['a', { parallel: 'ab', regions: { ab1: ['ab1a'], ab2: [], ab3: ['ab3b'] } }]),
-        )
+        expect(stateRoute).toEqual(['a', { parallel: 'ab', regions: { ab1: ['ab1a'], ab2: [], ab3: ['ab3b'] } }])
       })
     })
   })
@@ -323,7 +307,7 @@ describe('runtime_step.core', () => {
   describe('updateStateRouteForEntry()', () => {
     test('1: 新しいステートの内新規に入るステートについて浅い階層から順に定義を返す', async () => {
       const destSplittedStates = [['a', 'ab', 'aba']] // /a/ab/aba
-      const crrStates = objectifyRouteString(['a'])
+      const crrStates = ['a']
       const results = [
         ...updateStateRouteForEntry(destSplittedStates, crrStates, {
           initial: 'a',
@@ -367,14 +351,12 @@ describe('runtime_step.core', () => {
       expect(results.map(([_, { stateName }]) => stateName)).toEqual(['ab', 'aba'])
       expect(results.map(([_, { isRegionChild }]) => isRegionChild)).toEqual([false, false])
 
-      expect(crrStates, 'crrStateTree に新しい経路を追加する（削除は行わない）').toEqual(
-        objectifyRouteString(['a', 'ab', 'aba']),
-      )
+      expect(crrStates, 'crrStateTree に新しい経路を追加する（削除は行わない）').toEqual(['a', 'ab', 'aba'])
     })
 
     test('2: fullToSplittees 以下にサブステートがある場合、その末端までが新しいステートとなる', async () => {
       const destSplittedStates = [['a']] // これより下に子ステートがある
-      const crrStates = objectifyRouteString(['a'])
+      const crrStates = ['a']
       const results = [
         ...updateStateRouteForEntry(destSplittedStates, crrStates, {
           initial: 'a',
@@ -418,7 +400,7 @@ describe('runtime_step.core', () => {
       expect(results.map(([_, { stateName }]) => stateName)).toEqual(['ab', 'aba'])
       expect(results.map(([_, { isRegionChild }]) => isRegionChild)).toEqual([false, false])
 
-      expect(crrStates, 'crrStateTree に新しい経路を追加する').toEqual(objectifyRouteString(['a', 'ab', 'aba']))
+      expect(crrStates, 'crrStateTree に新しい経路を追加する').toEqual(['a', 'ab', 'aba'])
     })
 
     describe('parallel 1', () => {
@@ -497,7 +479,7 @@ describe('runtime_step.core', () => {
 
       test('3.1: ステート遷移先が parallel である場合、子がすべて対象になる', () => {
         const destStates = [['a']] // これより下に子ステートがある
-        const crrStates = objectifyRouteString([{ parallel: 'a', regions: {} }])
+        const crrStates = [{ parallel: 'a', regions: {} }]
         const results = [...updateStateRouteForEntry(destStates, crrStates, stateDefinition)]
 
         expect(results.map(([_, { stateName }]) => stateName)).toEqual([
@@ -519,30 +501,28 @@ describe('runtime_step.core', () => {
           undefined,
         ])
 
-        expect(crrStates, 'crrStateTree に新しい経路を追加する').toEqual(
-          objectifyRouteString([
-            {
-              parallel: 'a',
-              regions: {
-                a1: ['a1a'],
-                a2: [
-                  {
-                    parallel: 'a2b',
-                    regions: {
-                      a2b1: ['a2b1a'],
-                      a2b2: [],
-                    },
+        expect(crrStates, 'crrStateTree に新しい経路を追加する').toEqual([
+          {
+            parallel: 'a',
+            regions: {
+              a1: ['a1a'],
+              a2: [
+                {
+                  parallel: 'a2b',
+                  regions: {
+                    a2b1: ['a2b1a'],
+                    a2b2: [],
                   },
-                ],
-              },
+                },
+              ],
             },
-          ]),
-        )
+          },
+        ])
       })
 
       test('3.2: parallel の leaf を指定した場合でも途中の parallel も起動する', () => {
         const destStates = [['a', 'a1', 'a1b']] // これより下に子ステートがある
-        const crrStates = objectifyRouteString([{ parallel: 'a', regions: { a1: [] } }])
+        const crrStates = [{ parallel: 'a', regions: { a1: [] } as any }]
         const results = [...updateStateRouteForEntry(destStates, crrStates, stateDefinition)]
 
         expect(results.map(([_, { stateName }]) => stateName)).toEqual(['a1b', 'a2', 'a2b', 'a2b1', 'a2b1a', 'a2b2'])
@@ -555,25 +535,23 @@ describe('runtime_step.core', () => {
           undefined,
         ])
 
-        expect(crrStates, 'crrStateTree に新しい経路を追加する').toEqual(
-          objectifyRouteString([
-            {
-              parallel: 'a',
-              regions: {
-                a1: ['a1b'],
-                a2: [
-                  {
-                    parallel: 'a2b',
-                    regions: {
-                      a2b1: ['a2b1a'],
-                      a2b2: [],
-                    },
+        expect(crrStates, 'crrStateTree に新しい経路を追加する').toEqual([
+          {
+            parallel: 'a',
+            regions: {
+              a1: ['a1b'],
+              a2: [
+                {
+                  parallel: 'a2b',
+                  regions: {
+                    a2b1: ['a2b1a'],
+                    a2b2: [],
                   },
-                ],
-              },
+                },
+              ],
             },
-          ]),
-        )
+          },
+        ])
       })
 
       test('3.3: parallel の leaf を指定した場合でも途中の parallel も起動する', () => {
@@ -581,40 +559,34 @@ describe('runtime_step.core', () => {
           ['a', 'a1', 'a1a'],
           ['a', 'a2', 'a2b'],
         ]
-        const crrStates = objectifyRouteString([{ parallel: 'a', regions: { a1: [], a2: [] } }])
+        const crrStates = [{ parallel: 'a', regions: { a1: [] as StateRoute, a2: [] as StateRoute } }]
         const results = [...updateStateRouteForEntry(destStates, crrStates, stateDefinition)]
 
-        expect(results.map(([_, { stateName }]) => stateName)).toEqual([
-          'a1a', 'a2b', 'a2b1', 'a2b1a', 'a2b2',
-        ])
+        expect(results.map(([_, { stateName }]) => stateName)).toEqual(['a1a', 'a2b', 'a2b1', 'a2b1a', 'a2b2'])
         expect(results.map(([_, { isRegionChild }]) => isRegionChild)).toEqual([true, true, undefined, true, undefined])
 
-        expect(crrStates, 'crrStateTree に新しい経路を追加する').toEqual(
-          objectifyRouteString([
-            {
-              parallel: 'a',
-              regions: {
-                a1: ['a1a'],
-                a2: [
-                  {
-                    parallel: 'a2b',
-                    regions: {
-                      a2b1: ['a2b1a'],
-                      a2b2: [],
-                    },
+        expect(crrStates, 'crrStateTree に新しい経路を追加する').toEqual([
+          {
+            parallel: 'a',
+            regions: {
+              a1: ['a1a'],
+              a2: [
+                {
+                  parallel: 'a2b',
+                  regions: {
+                    a2b1: ['a2b1a'],
+                    a2b2: [],
                   },
-                ],
-              },
+                },
+              ],
             },
-          ]),
-        )
+          },
+        ])
       })
     })
   })
 
-  describe.todo('genChildDoneEvents', () => {
-
-  })
+  describe.todo('genChildDoneEvents', () => { })
 
   describe('x_findDeepestTransitions', () => {
     const findTransition = ({ events }: TopLvStDefItem<string>, eType: string) => {
@@ -644,17 +616,10 @@ describe('runtime_step.core', () => {
 
     test('0:空のstateRoute', async () => {
       const activeParallelSet = new Set<string>()
-      expect(
-        x_findDeepestTransitions(
-          objectifyRouteString([]),
-          0,
-          '',
-          activeParallelSet,
-          stateCatalog,
-          findTransition,
-          'FIRE',
-        ),
-      ).toEqual([[], []])
+      expect(x_findDeepestTransitions([], 0, '', activeParallelSet, stateCatalog, findTransition, 'FIRE')).toEqual([
+        [],
+        [],
+      ])
       expect([...activeParallelSet]).toEqual([])
     })
 
@@ -667,15 +632,7 @@ describe('runtime_step.core', () => {
           ['/a/aa/aaa', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
         ])
         expect(
-          x_findDeepestTransitions(
-            objectifyRouteString(['a', 'aa', 'aaa']),
-            0,
-            '',
-            activeParallelSet,
-            stateCatalog,
-            findTransition,
-            'FIRE',
-          ),
+          x_findDeepestTransitions(['a', 'aa', 'aaa'], 0, '', activeParallelSet, stateCatalog, findTransition, 'FIRE'),
         ).toEqual([[], ['/a/aa/aaa']])
         expect([...activeParallelSet]).toEqual([])
       })
@@ -702,15 +659,7 @@ describe('runtime_step.core', () => {
           ],
         ])
         expect(
-          x_findDeepestTransitions(
-            objectifyRouteString(['a', 'aa', 'aaa']),
-            0,
-            '',
-            activeParallelSet,
-            stateCatalog,
-            findTransition,
-            'FIRE',
-          ),
+          x_findDeepestTransitions(['a', 'aa', 'aaa'], 0, '', activeParallelSet, stateCatalog, findTransition, 'FIRE'),
         ).toEqual([
           [
             {
@@ -740,15 +689,7 @@ describe('runtime_step.core', () => {
           ['/a/aa/aaa', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
         ])
         expect(
-          x_findDeepestTransitions(
-            objectifyRouteString(['a', 'aa', 'aaa']),
-            0,
-            '',
-            activeParallelSet,
-            stateCatalog,
-            findTransition,
-            'FIRE',
-          ),
+          x_findDeepestTransitions(['a', 'aa', 'aaa'], 0, '', activeParallelSet, stateCatalog, findTransition, 'FIRE'),
         ).toEqual([
           [
             {
@@ -777,15 +718,7 @@ describe('runtime_step.core', () => {
           ['/a/aa/aaa', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
         ])
         expect(
-          x_findDeepestTransitions(
-            objectifyRouteString(['a', 'aa', 'aaa']),
-            0,
-            '',
-            activeParallelSet,
-            stateCatalog,
-            findTransition,
-            'FIRE',
-          ),
+          x_findDeepestTransitions(['a', 'aa', 'aaa'], 0, '', activeParallelSet, stateCatalog, findTransition, 'FIRE'),
         ).toEqual([
           [
             {
@@ -817,15 +750,9 @@ describe('runtime_step.core', () => {
           ['/a/aa/aa2/aa2b', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
           ['/a/aa/aa2/aa2b/aa2ba', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
         ])
-        const x = { a: ['aa', { aa1: { aa1a: {} }, aa2: { aa2b: { aa2ba: {} } } }] }
-        const y = ['a', { parallel: 'aa', regions: { aa1: ['aa1a'], aa2: ['aa2b', 'aa2ba'] } }]
-        const z = [['a'], { parallel: 'aa', regions: { aa1: [['aa1a']], aa2: [['aa2b'], ['aa2ba']] } }]
         expect(
           x_findDeepestTransitions(
-            objectifyRouteString([
-              Object('a'),
-              { parallel: 'aa', regions: { aa1: [Object('aa1a')], aa2: [Object('aa2b'), Object('aa2ba')] } },
-            ]),
+            ['a', { parallel: 'aa', regions: { aa1: ['aa1a'], aa2: ['aa2b', 'aa2ba'] } }],
             0,
             '',
             activeParallelSet,
@@ -857,7 +784,7 @@ describe('runtime_step.core', () => {
         ])
         expect(
           x_findDeepestTransitions(
-            objectifyRouteString(['a', { parallel: 'aa', regions: { aa1: ['aa1a'], aa2: ['aa2b', 'aa2ba'] } }]),
+            ['a', { parallel: 'aa', regions: { aa1: ['aa1a'], aa2: ['aa2b', 'aa2ba'] } }],
             0,
             '',
             activeParallelSet,
@@ -911,7 +838,7 @@ describe('runtime_step.core', () => {
         ])
         expect(
           x_findDeepestTransitions(
-            objectifyRouteString(['a', { parallel: 'aa', regions: { aa1: ['aa1a'], aa2: ['aa2b', 'aa2ba'] } }]),
+            ['a', { parallel: 'aa', regions: { aa1: ['aa1a'], aa2: ['aa2b', 'aa2ba'] } }],
             0,
             '',
             activeParallelSet,
@@ -956,7 +883,7 @@ describe('runtime_step.core', () => {
         ])
         expect(
           x_findDeepestTransitions(
-            objectifyRouteString(['a', { parallel: 'aa', regions: { aa1: ['aa1a'], aa2: ['aa2b', 'aa2ba'] } }]),
+            ['a', { parallel: 'aa', regions: { aa1: ['aa1a'], aa2: ['aa2b', 'aa2ba'] } }],
             0,
             '',
             activeParallelSet,
@@ -998,7 +925,7 @@ describe('runtime_step.core', () => {
         ])
         expect(
           x_findDeepestTransitions(
-            objectifyRouteString(['a', { parallel: 'aa', regions: { aa1: ['aa1a'], aa2: ['aa2b', 'aa2ba'] } }]),
+            ['a', { parallel: 'aa', regions: { aa1: ['aa1a'], aa2: ['aa2b', 'aa2ba'] } }],
             0,
             '',
             activeParallelSet,
@@ -1049,7 +976,7 @@ describe('runtime_step.core', () => {
         ])
         expect(
           x_findDeepestTransitions(
-            objectifyRouteString([
+            [
               'a',
               {
                 parallel: 'aa',
@@ -1058,7 +985,7 @@ describe('runtime_step.core', () => {
                   aa2: [{ parallel: 'aa2b', regions: { aa2b1: ['aa2b1a', 'aa2b1aa'], aa2b2: [], aa2b3: ['aa2b3a'] } }],
                 },
               },
-            ]),
+            ],
             0,
             '',
             activeParallelSet,
@@ -1121,7 +1048,7 @@ describe('runtime_step.core', () => {
         ])
         expect(
           x_findDeepestTransitions(
-            objectifyRouteString([
+            [
               'a',
               {
                 parallel: 'aa',
@@ -1130,7 +1057,7 @@ describe('runtime_step.core', () => {
                   aa2: [{ parallel: 'aa2b', regions: { aa2b1: ['aa2b1a', 'aa2b1aa'], aa2b2: [], aa2b3: ['aa2b3a'] } }],
                 },
               },
-            ]),
+            ],
             0,
             '',
             activeParallelSet,
@@ -1186,7 +1113,7 @@ describe('runtime_step.core', () => {
           ['/a/aa/aa2/aa2b/aa2b3/aa2b3a', { def: { ...DFL_STATE_ITEM_DEF }, sub: null }],
         ])
         const result = x_findDeepestTransitions(
-          objectifyRouteString([
+          [
             'a',
             {
               parallel: 'aa',
@@ -1195,7 +1122,7 @@ describe('runtime_step.core', () => {
                 aa2: [{ parallel: 'aa2b', regions: { aa2b1: ['aa2b1a', 'aa2b1aa'], aa2b2: [], aa2b3: ['aa2b3a'] } }],
               },
             },
-          ]),
+          ],
           0,
           '',
           activeParallelSet,
@@ -1248,7 +1175,7 @@ describe('runtime_step.core', () => {
         ])
         expect(
           x_findDeepestTransitions(
-            objectifyRouteString([
+            [
               'a',
               {
                 parallel: 'aa',
@@ -1257,7 +1184,7 @@ describe('runtime_step.core', () => {
                   aa2: [{ parallel: 'aa2b', regions: { aa2b1: ['aa2b1a', 'aa2b1aa'], aa2b2: [], aa2b3: ['aa2b3a'] } }],
                 },
               },
-            ]),
+            ],
             0,
             '',
             activeParallelSet,
@@ -1304,7 +1231,7 @@ describe('runtime_step.core', () => {
           'foo',
           undefined,
           runtimeUtils.makeFnBaseParam({}, { type: 'foo' }, undefined),
-          objectifyRouteString(['A', 'AA', 'AAA']),
+          ['A', 'AA', 'AAA'],
           {}, // machineGuards
           // stateCatalog
           new Map<string, NormalizedStateItemBoth>([
@@ -1377,7 +1304,7 @@ describe('runtime_step.core', () => {
           'foo',
           undefined,
           runtimeUtils.makeFnBaseParam({}, { type: 'foo' }, undefined),
-          objectifyRouteString([{ parallel: 'a', regions: { a1: ['a1a', 'a1aa'], a2: ['a2a'] } }]),
+          [{ parallel: 'a', regions: { a1: ['a1a', 'a1aa'], a2: ['a2a'] } }],
           {}, // machineGuards
           // stateCatalog
           new Map<string, NormalizedStateItemBoth>([
@@ -1470,12 +1397,12 @@ describe('runtime_step.core', () => {
           'foo',
           undefined,
           runtimeUtils.makeFnBaseParam({}, { type: 'foo' }, undefined),
-          objectifyRouteString([
+          [
             {
               parallel: 'a',
               regions: { a1: ['a1a'], a2: [{ parallel: 'a2a', regions: { a2a1: ['a2a1a'], a2a2: ['a2a2a'] } }] },
             },
-          ]),
+          ],
           {}, // machineGuards
           // stateCatalog
           new Map<string, NormalizedStateItemBoth>([
@@ -1604,7 +1531,7 @@ describe('runtime_step.core', () => {
           'foo',
           undefined,
           runtimeUtils.makeFnBaseParam({}, { type: 'foo' }, undefined),
-          objectifyRouteString([
+          [
             {
               parallel: 'a',
               regions: {
@@ -1612,7 +1539,7 @@ describe('runtime_step.core', () => {
                 a2: [{ parallel: 'a2a', regions: { a2a1: ['a2a1a'], a2a2: ['a2a2a'] } }],
               },
             },
-          ]),
+          ],
           {}, // machineGuards
           // stateCatalog
           new Map<string, NormalizedStateItemBoth>([
@@ -1745,7 +1672,7 @@ describe('runtime_step.core', () => {
             'foo',
             undefined,
             runtimeUtils.makeFnBaseParam({}, { type: 'foo' }, undefined),
-            objectifyRouteString([
+            [
               {
                 parallel: 'a',
                 regions: {
@@ -1759,7 +1686,7 @@ describe('runtime_step.core', () => {
                   ],
                 },
               },
-            ]),
+            ],
             {}, // machineGuards
             // stateCatalog
             new Map<string, NormalizedStateItemBoth>([
@@ -1843,7 +1770,7 @@ describe('runtime_step.core', () => {
             'foo',
             undefined,
             runtimeUtils.makeFnBaseParam({}, { type: 'foo' }, undefined),
-            objectifyRouteString([
+            [
               {
                 parallel: 'a',
                 regions: {
@@ -1858,7 +1785,7 @@ describe('runtime_step.core', () => {
                   ],
                 },
               },
-            ]),
+            ],
             {}, // machineGuards
             // stateCatalog
             new Map<string, NormalizedStateItemBoth>([
@@ -1940,14 +1867,14 @@ describe('runtime_step.core', () => {
             'foo',
             undefined,
             runtimeUtils.makeFnBaseParam({}, { type: 'foo' }, undefined),
-            objectifyRouteString([
+            [
               {
                 parallel: 'a',
                 regions: {
                   a1: [{ parallel: 'a1a', regions: { a1a1: ['a1a1a'], a1a2: [] } }],
                 },
               },
-            ]),
+            ],
             {}, // machineGuards
             // stateCatalog
             new Map<string, NormalizedStateItemBoth>([
@@ -2128,7 +2055,7 @@ describe('runtime_step.core', () => {
             ':childDone:',
             { path: '/a' },
             runtimeUtils.makeFnBaseParam({}, { type: ':childDone:' }, undefined),
-            objectifyRouteString([
+            [
               {
                 parallel: 'a',
                 regions: {
@@ -2144,7 +2071,7 @@ describe('runtime_step.core', () => {
                   ],
                 },
               },
-            ]),
+            ],
             {}, // machineGuards
             stateCatalog,
             GLOBAL_DEF_ITEM,
@@ -2169,7 +2096,7 @@ describe('runtime_step.core', () => {
             ':childDone:',
             { path: '/a/a2' },
             runtimeUtils.makeFnBaseParam({}, { type: ':childDone:' }, undefined),
-            objectifyRouteString([
+            [
               {
                 parallel: 'a',
                 regions: {
@@ -2177,7 +2104,7 @@ describe('runtime_step.core', () => {
                   a2: [{ parallel: 'a2a', regions: { a2a1: ['a2a1a'], a2a2: ['a2a2a'] } }],
                 },
               },
-            ]),
+            ],
             {}, // machineGuards
             stateCatalog,
             GLOBAL_DEF_ITEM,
@@ -2204,7 +2131,7 @@ describe('runtime_step.core', () => {
             'foo',
             undefined,
             runtimeUtils.makeFnBaseParam({}, { type: 'foo' }, undefined),
-            objectifyRouteString([
+            [
               {
                 parallel: 'a',
                 regions: {
@@ -2212,7 +2139,7 @@ describe('runtime_step.core', () => {
                   a2: [{ parallel: 'a2a', regions: { a2a1: ['a2a1a'], a2a2: ['a2a2a'] } }],
                 },
               },
-            ]),
+            ],
             {}, // machineGuards
 
             new Map<string, NormalizedStateItemBoth>([
@@ -2330,7 +2257,7 @@ describe('runtime_step.core', () => {
           'foo',
           undefined,
           runtimeUtils.makeFnBaseParam({}, { type: 'foo' }, undefined),
-          objectifyRouteString([
+          [
             {
               parallel: 'a',
               regions: {
@@ -2338,7 +2265,7 @@ describe('runtime_step.core', () => {
                 a2: [{ parallel: 'a2a', regions: { a2a1: ['a2a1a'], a2a2: ['a2a2a'] } }],
               },
             },
-          ]),
+          ],
           {}, // machineGuards
 
           new Map<string, NormalizedStateItemBoth>([
