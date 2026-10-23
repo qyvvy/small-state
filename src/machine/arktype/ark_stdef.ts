@@ -26,8 +26,8 @@ const o_Invocation = type([
   type.unit(InvokeSymbol),
   AnyFn,
   'null',
-  { 'id?': 'string', 'input?': AnyFn },
   type.or(AnyFn, 'string', ChildMachine),
+  { '+': 'reject', 'subKey?': 'string | number', 'input?': AnyFn },
   OnFnReturn.array(),
 ]).readonly()
 

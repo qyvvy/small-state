@@ -1376,8 +1376,8 @@ describe('machine', () => {
         ({ on, invoke, subStates }) => ({
           state1: [
             invoke(
-              { input: ({ c }) => c.count },
               'increment',
+              { input: ({ c }) => c.count },
               on('done', {
                 to: 'state2',
                 actions: ({ e, update }) => update({ count: e.output }),
@@ -1388,8 +1388,8 @@ describe('machine', () => {
               }),
             ),
             invoke(
-              { input: ({ c }) => c.count },
               async (count) => 'aiu' as const,
+              { input: ({ c }) => c.count },
               on('done', {
                 to: 'state2',
                 actions: ({ e, update, c }) => {
@@ -1409,9 +1409,8 @@ describe('machine', () => {
             subStates({
               subState1: [
                 invoke(
-                  { id: 'state2-invocation', input: ({ c }) => c.count },
-                  (count) => '',
-                  //(f)=>1,
+                  'increment',
+                  { subKey: 'state2-invocation', input: ({ c }) => c.count },
                   on('done', {
                     to: 'subState2',
                     actions: ({ e, update, c }) => {
@@ -1447,12 +1446,12 @@ describe('machine', () => {
               pPath: '',
               invocations: [
                 {
-                  id: '/state1[0]',
+                  mainKey: 'increment',
                   input: expect.any(Function),
                   src: { type: 'string', value: 'increment' },
                 },
                 {
-                  id: '/state1[1]',
+                  mainKey: '/state1[1]',
                   input: expect.any(Function),
                   src: { type: 'function', value: expect.any(Function) },
                 },
@@ -1498,9 +1497,10 @@ describe('machine', () => {
                     pPath: '/state2',
                     invocations: [
                       {
-                        id: 'state2-invocation',
+                        mainKey: 'increment',
+                        subKey: 'state2-invocation',
                         input: expect.any(Function),
-                        src: { type: 'function', value: expect.any(Function) },
+                        src: { type: 'string', value: 'increment' },
                       },
                     ],
                     internalEvents: {
@@ -1575,7 +1575,7 @@ describe('machine', () => {
             initContext: () => ({ count: 1 }),
           },
           ({ on, invoke }) => ({
-            state1: [invoke({}, () => null, on('done', { to: 'state2' }), on('error', { to: 'hoge' }))],
+            state1: [invoke(() => null, on('done', { to: 'state2' }), on('error', { to: 'hoge' }))],
             state2: null,
           }),
         ),

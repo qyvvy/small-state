@@ -36,7 +36,9 @@ export const ChildMachine = type({
 })
 
 const o_NormalizedInvocations = type({
-  'id?': 'string',
+  '+': 'reject',
+  mainKey: 'string',
+  'subKey?': 'string|number',
   'input?': AnyFn,
   src: type.or(
     { type: '"function"', value: AnyFn },

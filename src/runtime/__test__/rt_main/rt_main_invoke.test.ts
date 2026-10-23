@@ -80,7 +80,6 @@ describe('rt_main_invoke', () => {
       ({ invoke, on }) => ({
         loading: [
           invoke(
-            {},
             async () => {
               throw err
             },
@@ -136,7 +135,7 @@ describe('rt_main_invoke', () => {
       },
       ({ invoke, on }) => ({
         idle: [on('search', { to: 'searching', actions: ({ update }) => update({ q: 'hello' }) })],
-        searching: [invoke({ input: ({ c }) => ({ query: c.q }) }, src)],
+        searching: [invoke(src, { input: ({ c }) => ({ query: c.q }) })],
       }),
     )
     const rt = createRuntime(machine).start()
@@ -157,7 +156,6 @@ describe('rt_main_invoke', () => {
         ({ invoke, on }) => ({
           loading: [
             invoke(
-              {},
               src,
               on('done', { to: 'success', actions: ({ update, e }) => update({ user: e.output }) }),
               on('error', { to: 'failure' }),
@@ -285,16 +283,16 @@ describe('rt_main_invoke', () => {
         }),
       )
 
-    const makeParent = (child = makeChild()) =>
+    const makeParent = (key: string, child = makeChild()) =>
       createMachine(
         {
           initContext: () => ({ total: -1 }),
+          services: { [key]: child },
         },
         ({ invoke, on }) => ({
           running: [
             invoke(
-              { id: 'CHILD' },
-              child,
+              key,
               on('done', { to: 'finished', actions: ({ update, e }) => update({ total: e.output.total }) }),
             ),
             on('abort', { to: 'aborted' }),
@@ -304,9 +302,9 @@ describe('rt_main_invoke', () => {
         }),
       )
 
-    test('0:state に入ると子マシンが起動し、_children から id で参照できる', async () => {
-      const rt = createRuntime(makeParent()).start()
-      const child = rt.getSnapshot()._children.CHILD! as Runtime<any>
+    test('0:state に入ると子マシンが起動し、_children から key で参照できる', async () => {
+      const rt = createRuntime(makeParent('KEY')).start()
+      const child = rt.getSnapshot()._children.KEY!
       expect(rt.stateValue).toBe('/running')
 
       child.send({ type: 'inc' })
@@ -324,16 +322,17 @@ describe('rt_main_invoke', () => {
       }, () => ({ a: [] }))
       const parent = createMachine({
         initContext: () => ({ seed: 42 }),
+        services: { c: child }
       }, ({ invoke }) => ({
-        A: [invoke({ id: 'c', input: ({ c }) => ({ seed: c.seed }) }, child)]
+        A: [invoke('c', { input: ({ c }) => ({ seed: c.seed }) })]
       }))
       const rt = createRuntime(parent).start()
       expect((rt.getSnapshot()._children.c as any).context.seed).toBe(42)
     })
 
     test('0:親が state を抜けると子マシンが stop される', async () => {
-      const rt = createRuntime(makeParent()).start()
-      const child = rt.getSnapshot()._children.CHILD! as Runtime<any>
+      const rt = createRuntime(makeParent('KEY')).start()
+      const child = rt.getSnapshot()._children.KEY!
       rt.send({ type: 'abort' })
 
       expect(child.runtimeStatus).toBe('stopped')
@@ -341,8 +340,8 @@ describe('rt_main_invoke', () => {
     })
 
     test('0:停止した子に送ったイベントは親に影響しない', async () => {
-      const rt = createRuntime(makeParent()).start()
-      const child = rt.getSnapshot()._children.CHILD! as Runtime<any>
+      const rt = createRuntime(makeParent('KEY')).start()
+      const child = rt.getSnapshot()._children.KEY!
       rt.send({ type: 'abort' })
 
       child.send({ type: 'finish' })
@@ -350,8 +349,8 @@ describe('rt_main_invoke', () => {
     })
 
     test('0:親を stop すると子も stop される', async () => {
-      const rt = createRuntime(makeParent()).start()
-      const child = rt.getSnapshot()._children.CHILD! as Runtime<any>
+      const rt = createRuntime(makeParent('KEY')).start()
+      const child = rt.getSnapshot()._children.KEY!
       rt.stop()
       expect(child.runtimeStatus).toBe('stopped')
     })

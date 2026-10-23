@@ -21,13 +21,16 @@ export type EventBody = { type: string;[key: string]: any }
 export type EmittedEvent = { type: string;[key: string]: any }
 export type StateName = string
 
+export type InferEventBody<M extends Machine<any, any, any, any, any, any, any, any, any>> =
+  M extends Machine<any, infer E, any, any, any, any, any, any, any> ? E : never
+
 // type 以外のプロパティを持たない EventBody の型を抽出する
 export type PureETypeString<E extends EventBody> =
   E extends unknown ? Exclude<keyof E, "type"> extends never ? E['type'] : never : any
 
-export type FnBaseParams<C extends MContext, Ex extends EventBody, I, Additional = unknown, P = any> = [
+export type FnBaseParams<C extends MContext, Ex extends EventBody, I, Additional = unknown, Prm = any> = [
   arg: Expand<{ c: C; context: C; e: Ex; event: Ex; input: I } & Additional>,
-  params: P
+  params: Prm
 ]
 export type ActionFnParams<
   C extends MContext,
@@ -36,11 +39,13 @@ export type ActionFnParams<
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
+  S extends ServiceRecord
 > = FnBaseParams<C, Ex, I,
   {
     check: CheckFn<C, Ex, I, G>
     enqueue: EnqueueFn<C, Ex, I, EM, A>
     update: UpdateFn<C>
+    sendTo: SendToFn<S>
     emit: (emittedEvent: EM) => unknown
   }
 >
@@ -49,11 +54,11 @@ export type LimitedActionFnParams<
   E extends EventBody,
   I,
   EM extends EmittedEvent,
-  P = any
+  Prm = any
 > = FnBaseParams<C, E, I, {
   update: UpdateFn<C>,
   emit: (emittedEvent: EM) => unknown
-}, P>
+}, Prm>
 
 export type CheckFn<
   C extends MContext, Ex extends EventBody, I, G extends Record<string, Placeholder>
@@ -72,14 +77,41 @@ export type EnqueueFn<
   (fn: (arg: LimitedActionFnParams<C, Ex, I, EM>[0]) => void): void
 }
 
+// TODO: もし Cが narrow されるのなら Duplicate する
+export type UpdateFnParam<C extends MContext> = {
+  [K in keyof C]?: C[K] | (() => (C[K]))
+}
+export type UpdateFn<C extends MContext> = (updates: UpdateFnParam<C>) => unknown
+
+type O_ToMachineOnlyRecord<S extends ServiceRecord> = {
+  [K in keyof S as
+  S[K] extends Machine<any, any, any, any, any, any, any, any, any> ? K : never
+  ]: S[K] extends Machine<any, any, any, any, any, any, any, any, any> ? S[K] : never
+}
+type O_RemoveAfterColon<Sk> = Sk extends `${infer T}:${string}` ? T : Sk
+export type SendToFn<
+  S extends ServiceRecord,
+  Sm extends O_ToMachineOnlyRecord<S> = O_ToMachineOnlyRecord<S>
+> =
+  <Sk extends keyof Sm | `${keyof Sm & string}:${string}`>(
+    target: Sk,
+    event: InferEventBody<Sm[O_RemoveAfterColon<Sk> extends infer T extends keyof Sm ? T : never]>
+  ) => void
+
+
+export type EmitFn<EM extends EmittedEvent> = (emittedEvent: EM) => unknown
+
+
+
 type X_NormalizedGuard<C extends MContext = any, Ex extends EventBody = any, I = any> =
   ((arg: FnBaseParams<C, Ex, I>[0]) => boolean) | string | Record<string, ParamsInput<unknown, C, Ex, I>>
 export type NormalizedAction<
   C extends MContext = any, Ex extends EventBody = any, I = any, EM extends EmittedEvent = any,
   G extends Record<string, Placeholder> = any,
   A extends Record<string, Placeholder> = any,
+  S extends ServiceRecord = ServiceRecord
 > =
-  ((arg: ActionFnParams<C, Ex, I, EM, G, A>[0]) => unknown) | string | Record<string, ParamsInput<unknown, C, Ex, I>>
+  ((arg: ActionFnParams<C, Ex, I, EM, G, A, S>[0]) => unknown) | string | Record<string, ParamsInput<unknown, C, Ex, I>>
 export type NormalizedTransition = {
   to?: StateName
   fullTo?: string
@@ -93,8 +125,9 @@ export type NormalizedSrc =
   | { type: 'machine', value: Machine<any, any, any, any, any, any, any, any, any> }
 
 export type NormalizedInvocation = {
-  id?: string
+  mainKey: string
   input?: AnyFn
+  subKey?: string | number
   src: NormalizedSrc
 }
 
@@ -135,8 +168,8 @@ export type ParallelNormalizedDefinition = {
   stateOf: Record<string, ParallelNormalizedStateItem>
 }
 
-export type ParamsInput<P, C extends MContext, Ex extends EventBody, I> =
-  P | ((arg: FnBaseParams<C, Ex, I>[0]) => P)
+export type ParamsInput<Prm, C extends MContext, Ex extends EventBody, I> =
+  Prm | ((arg: FnBaseParams<C, Ex, I>[0]) => Prm)
 
 export type ParamsInputArgsOf<
   IR extends Record<string, Placeholder>,
@@ -148,16 +181,13 @@ export type ParamsInputArgsOf<
   ? []
   : [params: ParamsInput<IR[IRk], C, Ex, I>]
 
-// TODO: もし Cが narrow されるのなら Duplicate する
-export type UpdateFnParam<C extends MContext> = {
-  [K in keyof C]?: C[K] | (() => (C[K]))
-}
-export type UpdateFn<C extends MContext> = (updates: UpdateFnParam<C>) => unknown
-
-export type EmitFn<EM extends EmittedEvent> = (emittedEvent: EM) => unknown
 
 
-export type ServiceOptions = { signal: AbortSignal }
+export type FnServiceOptions = { signal: AbortSignal }
+export type ServiceRecord = Record<string,
+  | ((input: any, option: FnServiceOptions) => unknown)
+  | Machine<any, any, any, any, any, any, any, any, any>
+>
 
 export type MachineConfig<
   C extends MContext,
@@ -167,7 +197,7 @@ export type MachineConfig<
   O,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
-  S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
+  S extends ServiceRecord,
 > = {
   types?: { context?: C; events?: E; emitted?: EM; input?: I; output?: O }
   name?: string
@@ -193,7 +223,7 @@ export type Machine<
   O,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
-  S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
+  S extends ServiceRecord,
   ND extends NormalizedDefinition,
 > = {
   name: string

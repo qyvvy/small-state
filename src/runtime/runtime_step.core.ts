@@ -1,11 +1,11 @@
 import type {
   ActionFnParams,
   CheckFn,
-  EmitFn,
   EmittedEvent,
   EnqueueFn,
   EventBody,
   FnBaseParams,
+  InferEventBody,
   InternalEPayload,
   InternalEType,
   InternalEventBody,
@@ -22,14 +22,16 @@ import type {
   ParallelNormalizedStateItem,
   ParamsInput,
   ParamsInputArgsOf,
+  SendToFn,
+  ServiceRecord,
   TopLvStDefItem,
   UpdateFn,
   UpdateFnParam,
 } from '../machine/m.types'
 import { ST_DELIM } from '../shared/constants'
-import type { AnyFn, Placeholder, RecursiveRecord, Values } from '../shared/general.types'
+import type { Placeholder, RecursiveRecord, Values } from '../shared/general.types'
 import { deepFreeze, parentPathOf, splitStPath } from '../shared/utils'
-import { createRuntime } from './Runtime'
+import { createRuntime, Runtime } from './Runtime'
 import type { RuntimeOutbound, StateRoute } from './r.types'
 import {
   readyToEvalGuard,
@@ -265,6 +267,7 @@ export function readyAction<
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
+  S extends ServiceRecord,
   Ex extends E | InternalEventBody = E | InternalEventBody,
 >(
   origContext: C,
@@ -272,8 +275,9 @@ export function readyAction<
   input: I,
   machineGuards: Machine<C, E, I, any, any, any, any, any, any>['internal']['guards'],
   machineActions: Machine<C, E, I, EM, any, any, any, any, any>['internal']['actions'],
-  emit: EmitFn<EM>,
+  rtOutbound: RuntimeOutbound<E, EM, S>,
 ) {
+  const { emit } = rtOutbound
   let context = deepFreeze(origContext)
   let updateApplications: UpdateFnParam<C>[] = []
   let enqueuees: {
@@ -319,6 +323,17 @@ export function readyAction<
     return fn(fnBaseParam, typeof params !== 'function' ? params : params(fnBaseParam))
   }
 
+  function sendTo(target: string, event: InferEventBody<Machine<any, any, any, any, any, any, any, any, any>>) {
+    if (!Object.hasOwn(rtOutbound.children, target)) {
+      throw new Error(`Cannot send event to "${target}": child not found.`)
+    }
+    const service = rtOutbound.children[target]
+    if (!(service instanceof Runtime)) {
+      throw new Error(`Cannot send event to "${target}": child is not a machine runtime.`)
+    }
+    service.send(event)
+  }
+
   let isProcessingQueue = false
   function enqueue<Ak extends (keyof A & string) | never>(
     type:
@@ -349,10 +364,10 @@ export function readyAction<
     },
 
     execAction<Exx extends Ep extends undefined ? Ex : any, Ep extends EventBody | undefined = undefined>(
-      transitionAction: NormalizedAction<C, Ex, I, EM, G, A>,
+      transitionAction: NormalizedAction<C, Ex, I, EM, G, A, S>,
       providedEvent?: Ep,
     ) {
-      const bodies = resolveActionElement<C, Ex, I, EM, ActionFnParams<C, Ex, I, EM, G, A>[0]>(
+      const bodies = resolveActionElement<C, Ex, I, EM, ActionFnParams<C, Ex, I, EM, G, A, S>[0]>(
         transitionAction,
         machineActions,
       )
@@ -365,6 +380,7 @@ export function readyAction<
           e: qEvent,
           input,
           update,
+          sendTo: sendTo as SendToFn<S>,
           emit,
           check: check as CheckFn<C, Ex, I, G>,
           enqueue: enqueue as EnqueueFn<C, Ex, I, EM, A>,
@@ -666,70 +682,78 @@ export function* updateStateRouteForEntry(
   )
 }
 
-
-export function launchInvocations(
+export function launchInvocations<E extends EventBody, S extends ServiceRecord>(
   invocations: NormalizedInvocation[],
   path: string,
   makeFnBaseParam: () => FnBaseParams<any, any, any>[0],
   machineServices: Machine<any, any, any, any, any, any, any, any, any>['internal']['services'],
-  rtOutbound: RuntimeOutbound<any>,
+  rtOutbound: RuntimeOutbound<E, any, S>,
 ) {
   const { enqueueEvent } = rtOutbound
   const fnBaseParam = makeFnBaseParam()
-  for (const [i, { id, input, src }] of invocations.entries()) {
+  for (const [i, { input, mainKey, subKey, src }] of invocations.entries()) {
+    const [srcType, srcValue] = (() => {
+      const { type, value } = src
+      if (type !== 'string') {
+        return [type, value]
+      }
+      const service = machineServices[value]
+      if (!service) throw new Error(`invoke: Unknown src: "${value}"`)
+      return [typeof service === 'function' ? 'function' : 'machine', service]
+    })()
+
+    const childKey = subKey ? `${mainKey}:${subKey}` : mainKey
+    if (rtOutbound.children[childKey]) {
+      throw new Error(`Service with ID '${childKey}' is already running.`)
+    }
     const inputValue = input && typeof input === 'function' ? input(fnBaseParam) : undefined
-    let srcFn: AnyFn
-    switch (src.type) {
+
+    switch (srcType) {
+      case 'function': {
+        const abortController = new AbortController()
+        const { signal } = abortController
+        rtOutbound.children = {
+          ...rtOutbound.children,
+          [childKey]: { stop: () => abortController.abort() },
+        }
+        Promise.resolve()
+          .then(() => srcValue(inputValue, { signal }))
+          .then((output) => {
+            if (!signal.aborted) {
+              enqueueEvent({ type: `invoke/done[${i}]`, output }, { path })
+            }
+          })
+          .catch((error) => {
+            if (!signal.aborted) {
+              enqueueEvent({ type: `invoke/error[${i}]`, error }, { path })
+            }
+          })
+        break
+      }
       case 'machine': {
-        const childRt = createRuntime(src.value, { id, input: () => inputValue })
-        rtOutbound.children = { ...rtOutbound.children, [id!]: childRt }
+        const childRt = createRuntime(srcValue, { id: childKey, input: () => inputValue })
+        rtOutbound.children = { ...rtOutbound.children, [childKey]: childRt }
         childRt.subscribe(({ runtimeStatus, output }) => {
           if (runtimeStatus === 'done') {
             enqueueEvent({ type: `invoke/done[${i}]`, output }, { path })
           }
         })
         childRt.start()
-        continue
-      }
-      case 'string': {
-        srcFn = machineServices[src.value]
-        if (!srcFn) throw new Error(`invoke: Unknown src: "${src.value}"`)
-        break
-      }
-      case 'function': {
-        srcFn = src.value
         break
       }
     }
-    const abController = new AbortController()
-    const { signal } = abController
-    rtOutbound.children = {
-      ...rtOutbound.children,
-      [id!]: { stop: () => abController.abort() },
-    }
-    Promise.resolve()
-      .then(() => srcFn(inputValue, { signal }))
-      .then((output) => {
-        if (!signal.aborted) {
-          enqueueEvent({ type: `invoke/done[${i}]`, output }, { path })
-        }
-      })
-      .catch((error) => {
-        if (!signal.aborted) {
-          enqueueEvent({ type: `invoke/error[${i}]`, error }, { path })
-        }
-      })
   }
 }
 
-export function stopInvocations(
+export function stopInvocations<E extends EventBody, S extends ServiceRecord>(
   invocations: NormalizedInvocation[],
-  rtOutbound: RuntimeOutbound<any>,
+  rtOutbound: RuntimeOutbound<E, any, S>,
 ) {
   const newChildren = { ...rtOutbound.children }
-  for (const { id } of invocations) {
-    newChildren[id!]!.stop()
-    delete newChildren[id!]
+  for (const { mainKey, subKey } of invocations) {
+    const key = subKey ? `${mainKey}:${subKey}` : mainKey
+    newChildren[key]!.stop()
+    delete newChildren[key]
   }
   rtOutbound.children = newChildren
 }

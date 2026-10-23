@@ -1,13 +1,17 @@
-import type { EventBody, InternalEPayload, InternalEventBody, Machine } from '../machine/m.types'
-import type { IsAny } from '../shared/general.types';
+import type { EmittedEvent, EventBody, InternalEPayload, InternalEventBody, Machine, ServiceRecord } from '../machine/m.types'
+import type { AnyFn, IsAny } from '../shared/general.types';
 import type { Runtime } from './Runtime'
 
 export type StateRoute = Array<string | { parallel: string; regions: { [key: string]: StateRoute }; output?: unknown }>
 
-type Child = { stop: () => void } | Runtime<any>
-export type RuntimeOutbound<E extends EventBody> = {
+type Child<TService> = TService extends Machine<any, any, any, any, any, any, any, any, any> ? Runtime<TService> : TService extends AnyFn ? { stop: () => void } : never
+export type Children<S extends ServiceRecord> = {
+  [K in keyof S & string as K | `${K}:${string | number}`]?: Child<S[K]>
+} & { [key: string]: Child<any> }
+export type RuntimeOutbound<E extends EventBody, EM extends EmittedEvent, S extends ServiceRecord> = {
   enqueueEvent: (event: E | InternalEventBody, payload?: InternalEPayload) => void
-  children: Record<string, Child>
+  emit: (emittedEvent: EM) => void
+  children: Children<S>
 }
 
 export type InferredMachineTypes<M extends Machine<any, any, any, any, any, any, any, any, any>> =

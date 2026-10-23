@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, jest, mock, test } from 'bun:test'
-import type { NormalizedDefinition, NormalizedStateItemBoth, TopLvStDefItem } from '../../machine/m.types'
+import type { NormalizedDefinition, NormalizedStateItemBoth, ServiceRecord, TopLvStDefItem } from '../../machine/m.types'
 import type { StateRoute } from '../r.types'
 import {
   __test__,
@@ -104,7 +104,8 @@ describe('runtime_step.core', () => {
           null,
           { type: 'emittedFoo' },
           { guardFalse: unknown; guardFoo: { value: number } },
-          { inc: unknown }
+          { inc: unknown },
+          ServiceRecord
         >
       >
       const context = { name: '', count: 0, flag: false as boolean }
@@ -117,7 +118,7 @@ describe('runtime_step.core', () => {
           {
             inc: ({ c, update }) => update({ count: c.count + 1 }),
           },
-          (emitted) => mockFn1(emitted),
+          { emit: (emitted) => mockFn1(emitted), children: {}, enqueueEvent: () => null },
         )
       })
 

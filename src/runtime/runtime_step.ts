@@ -1,5 +1,4 @@
 import type {
-  EmitFn,
   EmittedEvent,
   EventBody,
   FnBaseParams,
@@ -9,6 +8,7 @@ import type {
   MContext,
   NormalizedAction,
   NormalizedDefinition,
+  ServiceRecord,
 } from '../machine/m.types'
 import { MICROSTEP_LOOP_LIMIT, ST_DELIM } from '../shared/constants'
 import type { Placeholder } from '../shared/general.types'
@@ -60,20 +60,20 @@ export function initRuntime<
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
+  S extends ServiceRecord,
   ND extends NormalizedDefinition,
 >(
   realContext: C,
   input: I,
   crrStates: StateRoute,
   machineInternal: Machine<C, E, I, EM, any, G, A, any, ND>['internal'],
-  emit: EmitFn<EM>,
-  rtOutbound: RuntimeOutbound<E>,
+  rtOutbound: RuntimeOutbound<E, EM, S>,
   event: E = { type: ':init:' } as E,
 ) {
   const { definition, guards, actions } = machineInternal
   const { initial } = definition
 
-  const actionRunner = readyAction<C, E, I, EM, G, A>(realContext, event, input, guards, actions, emit)
+  const actionRunner = readyAction<C, E, I, EM, G, A, S>(realContext, event, input, guards, actions, rtOutbound)
 
   const tExecs: TransitionExec[] = [
     {
@@ -97,14 +97,15 @@ export function macrostep<
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
+  S extends ServiceRecord,
   ND extends NormalizedDefinition,
 >(
   eType: Ex['type'],
   internalEPayload: InternalEPayload | undefined,
   crrStates: StateRoute,
-  actionRunner: ReturnType<typeof readyAction<C, E, I, EM, G, A, Ex>>,
+  actionRunner: ReturnType<typeof readyAction<C, E, I, EM, G, A, S, Ex>>,
   machineInternal: Machine<C, E, I, EM, any, G, A, any, ND>['internal'],
-  rtOutbound: RuntimeOutbound<E>,
+  rtOutbound: RuntimeOutbound<E, EM, S>,
 ) {
   const { guards, stateCatalog, topLvDefItem } = machineInternal
 
@@ -142,13 +143,14 @@ function runMicrosteps<
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
+  S extends ServiceRecord,
   ND extends NormalizedDefinition,
 >(
   tExecs: TransitionExec[],
   crrStates: StateRoute,
-  actionRunner: ReturnType<typeof readyAction<C, E, I, EM, G, A, Ex>>,
+  actionRunner: ReturnType<typeof readyAction<C, E, I, EM, G, A, S, Ex>>,
   machineInternal: Machine<C, E, I, EM, any, G, A, any, ND>['internal'],
-  rtOutbound: RuntimeOutbound<E>,
+  rtOutbound: RuntimeOutbound<E, EM, S>,
 ) {
   const internalQueue: Array<[EventBody, InternalEPayload]> = []
 
@@ -199,13 +201,14 @@ function runExitAndEntryThenAlways<
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
+  S extends ServiceRecord,
   ND extends NormalizedDefinition,
 >(
   tExecs: TransitionExec[],
   crrStates: StateRoute,
-  actionRunner: ReturnType<typeof readyAction<C, E, I, EM, G, A, Ex>>,
+  actionRunner: ReturnType<typeof readyAction<C, E, I, EM, G, A, S, Ex>>,
   machineInternal: Machine<C, E, I, EM, any, G, A, any, ND>['internal'],
-  rtOutbound: RuntimeOutbound<E>,
+  rtOutbound: RuntimeOutbound<E, EM, S>,
   internalQueue: Array<[EventBody, InternalEPayload]>,
 ) {
   let [alwaysTExecs, hasTransitioned] = exitAndEntry(
@@ -244,13 +247,14 @@ function exitAndEntry<
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
+  S extends ServiceRecord,
   ND extends NormalizedDefinition,
 >(
   tExecs: TransitionExec[],
   crrStates: StateRoute,
-  actionRunner: ReturnType<typeof readyAction<C, E, I, EM, G, A, Ex>>,
+  actionRunner: ReturnType<typeof readyAction<C, E, I, EM, G, A, S, Ex>>,
   { guards, services, stateCatalog, definition }: Machine<C, E, I, EM, any, G, A, any, ND>['internal'],
-  rtOutbound: RuntimeOutbound<E>,
+  rtOutbound: RuntimeOutbound<E, EM, S>,
   internalQueue: Array<[EventBody, InternalEPayload]>,
 ): [TransitionExec[], hasTransitioned: boolean] {
   const { makeFnBaseParam, execAction, processQueue } = actionRunner

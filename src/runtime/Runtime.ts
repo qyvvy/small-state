@@ -4,29 +4,33 @@ import type {
   Machine,
   MContext,
   PureETypeString,
+  ServiceRecord,
 } from '../machine/m.types'
 import { ST_DELIM } from '../shared/constants'
 import type { Expand } from '../shared/general.types'
 import { defineFixedProperty } from '../shared/utils'
 import { MailBox } from './MailBox'
-import type { InferredMachineTypes, InputFromMachine, RuntimeOutbound, StateRoute } from './r.types'
+import type { Children, InferredMachineTypes, InputFromMachine, RuntimeOutbound, StateRoute } from './r.types'
 import { initRuntime, macrostep } from './runtime_step'
 import { readyAction } from './runtime_step.core'
 import { runtimeUtils } from './runtime_utils'
 
 export type RuntimeStatus = 'stopped' | 'active' | 'done' | 'error'
 
-type Snapshot<C extends MContext, O> = {
+type Snapshot<C extends MContext, O, S extends ServiceRecord> = {
   states: string[]
   stateValue: string | string[] | undefined
   context: Expand<X_RemovePrivateKeys<C>>
   c: Expand<X_RemovePrivateKeys<C>>
   runtimeStatus: RuntimeStatus
   output: O | undefined
-  _children: RuntimeOutbound<any>['children']
+  _children: Children<S>
 }
 
-type Observer<C extends MContext, O> = (current: Expand<Snapshot<C, O>>, prev: Expand<Snapshot<C, O>>) => void
+type Observer<C extends MContext, O, S extends ServiceRecord> = (
+  current: Expand<Snapshot<C, O, S>>,
+  prev: Expand<Snapshot<C, O, S>>,
+) => void
 
 export type RuntimeOptions<I> = {
   id?: string
@@ -37,14 +41,13 @@ type X_RemovePrivateKeys<T extends Record<string, unknown>> = {
   [K in keyof T as K extends `_${string}` ? never : K]: T[K]
 }
 
-
-export function createRuntime<
-  M extends Machine<any, any, any, any, any, any, any, any, any>,
->(machine: M, option?: RuntimeOptions<InputFromMachine<M>>) {
+export function createRuntime<M extends Machine<any, any, any, any, any, any, any, any, any>>(
+  machine: M,
+  option?: RuntimeOptions<InputFromMachine<M>>,
+) {
   const runtime = new Runtime(machine, option)
   return runtime
 }
-
 
 type C<Mt extends InferredMachineTypes<any>> = Mt['C']
 type E<Mt extends InferredMachineTypes<any>> = Mt['E']
@@ -53,6 +56,7 @@ type EM<Mt extends InferredMachineTypes<any>> = Mt['EM']
 type O<Mt extends InferredMachineTypes<any>> = Mt['O']
 type G<Mt extends InferredMachineTypes<any>> = Mt['G']
 type A<Mt extends InferredMachineTypes<any>> = Mt['A']
+type S<Mt extends InferredMachineTypes<any>> = Mt['S']
 
 export class Runtime<
   M extends Machine<any, any, any, any, any, any, any, any, any>,
@@ -66,14 +70,14 @@ export class Runtime<
   #crrStates: StateRoute = []
   #sentQueue: MailBox<E<Mt> | InternalEventBody, InternalEPayload> = new MailBox(this.#processSentEvent.bind(this))
   #enqueueEvent = this.#sentQueue.enqueue.bind(this.#sentQueue)
-  #outbound: RuntimeOutbound<E<Mt>> = {
+  #outbound: RuntimeOutbound<E<Mt>, EM<Mt>, S<Mt>> = {
     enqueueEvent: this.#enqueueEvent,
+    emit: this.#_emit.bind(this),
     children: {},
   }
-  #emit = this.#_emit.bind(this)
-  #observers = new Set<Observer<C<Mt>, O<Mt>>>()
+  #observers = new Set<Observer<C<Mt>, O<Mt>, S<Mt>>>()
   #emittedListeners: Map<string, Set<(emittedEvent: EM<Mt>) => void>> = new Map()
-  #snapshot = {} as Snapshot<C<Mt>, O<Mt>>
+  #snapshot = {} as Snapshot<C<Mt>, O<Mt>, S<Mt>>
   #isStarted = false
 
   get states() {
@@ -87,6 +91,9 @@ export class Runtime<
   }
   get runtimeStatus() {
     return this.#snapshot.runtimeStatus
+  }
+  getSnapshot() {
+    return this.#snapshot
   }
 
   constructor(machine: M, { id, input }: RuntimeOptions<I<Mt>> = {}) {
@@ -102,7 +109,7 @@ export class Runtime<
     this.#buildAndSetSnapshot(context, true, 'stopped')()
   }
 
-  subscribe(observer: Observer<C<Mt>, O<Mt>>) {
+  subscribe(observer: Observer<C<Mt>, O<Mt>, S<Mt>>) {
     this.#observers.add(observer)
     return () => this.#observers.delete(observer)
   }
@@ -118,7 +125,6 @@ export class Runtime<
       this.#input,
       this.#crrStates,
       this.#machineInternal,
-      this.#emit,
       this.#outbound,
     )
 
@@ -168,10 +174,6 @@ export class Runtime<
     }
   }
 
-  getSnapshot() {
-    return this.#snapshot
-  }
-
   #processSentEvent<Ex extends E<Mt> | InternalEventBody>(event: Ex, internalEPayload?: InternalEPayload) {
     const { guards, actions } = this.#machineInternal
     const actionRunner = readyAction<C<Mt>, E<Mt>, I<Mt>, EM<Mt>, G<Mt>, A<Mt>, Ex>(
@@ -180,7 +182,7 @@ export class Runtime<
       this.#input,
       guards,
       actions,
-      this.#emit,
+      this.#outbound,
     )
 
     const result = macrostep(
@@ -213,11 +215,7 @@ export class Runtime<
     }
   }
 
-  #buildAndSetSnapshot(
-    newRealContext: C<Mt>,
-    hasTransitioned: boolean,
-    runtimeStatus?: RuntimeStatus,
-  ) {
+  #buildAndSetSnapshot(newRealContext: C<Mt>, hasTransitioned: boolean, runtimeStatus?: RuntimeStatus) {
     const oldSnapshot = this.#snapshot
 
     const crrStates = this.#crrStates
@@ -259,7 +257,7 @@ export class Runtime<
         output: !(isCompleted && output)
           ? undefined
           : output(runtimeUtils.makeFnBaseParam(newRealContext, event, this.#input)),
-        _children: this.#outbound.children
+        _children: this.#outbound.children,
       }
 
       {

@@ -13,6 +13,7 @@ import type {
   EmittedEvent,
   EventBody,
   FnBaseParams,
+  FnServiceOptions,
   InternalEPayload,
   InternalEventBody,
   LimitedActionFnParams,
@@ -26,7 +27,7 @@ import type {
   NStateItemDef,
   ParallelNormalizedDefinition,
   ParamsInput,
-  ServiceOptions,
+  ServiceRecord,
   StateName,
   TopLvStDefItem,
 } from './m.types'
@@ -40,11 +41,8 @@ type X_DefTypeRefluxer<
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
+  S extends ServiceRecord = ServiceRecord,
   Eb extends BuiltinEType = BuiltinEType,
-  S extends Record<string, (input: any, option: ServiceOptions) => unknown> = Record<
-    string,
-    (input: any, option: ServiceOptions) => unknown
-  >,
   R = unknown,
 > = () => R
 
@@ -93,10 +91,11 @@ type Action<
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
+  S extends ServiceRecord,
 > =
   | Expand<X_ImplKeys<A>>
   | Values<{ [K in keyof A & string as unknown extends A[K] ? never : K]: { [K2 in K]: ParamsInput<A[K], C, Ex, I> } }> // { [actionName: string]: Params }
-  | ((arg: ActionFnParams<C, Ex, I, EM, G, A>[0]) => unknown)
+  | ((arg: ActionFnParams<C, Ex, I, EM, G, A, S>[0]) => unknown)
 
 type StDefMetaInfo<C extends MContext, E extends EventBody, I> = {
   final?: boolean | ((args: FnBaseParams<C, E, I>[0]) => unknown)
@@ -109,11 +108,12 @@ type StDefCoreItem<
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
+  S extends ServiceRecord,
 > =
   | StDefMetaInfo<C, E, I>
-  | readonly [E['type'] | BuiltinEType, X_DefTypeRefluxer<C, E, I, EM, G, A>, X_HiddenImpl] // on
-  | readonly [typeof EntrySymbol, X_DefTypeRefluxer<C, E, I, EM, G, A>, null, X_HiddenImpl] // entryHook
-  | readonly [typeof ExitSymbol, X_DefTypeRefluxer<C, E, I, EM, G, A>, null, X_HiddenImpl] // exitHook
+  | readonly [E['type'] | BuiltinEType, X_DefTypeRefluxer<C, E, I, EM, G, A, S>, X_HiddenImpl] // on
+  | readonly [typeof EntrySymbol, X_DefTypeRefluxer<C, E, I, EM, G, A, S>, null, X_HiddenImpl] // entryHook
+  | readonly [typeof ExitSymbol, X_DefTypeRefluxer<C, E, I, EM, G, A, S>, null, X_HiddenImpl] // exitHook
 
 type StateDefinition<
   C extends MContext,
@@ -122,11 +122,11 @@ type StateDefinition<
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
-  S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
+  S extends ServiceRecord,
 > = null | Array<
-  | StDefCoreItem<C, E, I, EM, G, A>
-  | readonly [X_DefTypeRefluxer<C, E, I, EM, G, A, BuiltinEType, S, any>, unknown] // subStates|parallel
-  | readonly [typeof InvokeSymbol, X_DefTypeRefluxer<C, E, I, EM, G, A, never, S>, null, unknown, any, any] // invoke
+  | StDefCoreItem<C, E, I, EM, G, A, S>
+  | readonly [X_DefTypeRefluxer<C, E, I, EM, G, A, S, BuiltinEType, any>, unknown] // subStates|parallel
+  | readonly [typeof InvokeSymbol, X_DefTypeRefluxer<C, E, I, EM, G, A, S, never>, null, unknown, any, any] // invoke
 >
 
 function entryHook<
@@ -136,8 +136,9 @@ function entryHook<
   EM extends EmittedEvent,
   const G extends Record<string, Placeholder>,
   const A extends Record<string, Placeholder>,
->(...actions: Array<Action<C, E, I, EM, G, A>>) {
-  return [EntrySymbol, (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A>, null, actions] as const // StDefItems
+  S extends ServiceRecord,
+>(...actions: Array<Action<C, E, I, EM, G, A, S>>) {
+  return [EntrySymbol, (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A, S>, null, actions] as const // StDefItems
 }
 
 function exitHook<
@@ -147,8 +148,9 @@ function exitHook<
   EM extends EmittedEvent,
   const G extends Record<string, Placeholder>,
   const A extends Record<string, Placeholder>,
->(...actions: Array<Action<C, E, I, EM, G, A>>) {
-  return [ExitSymbol, (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A>, null, actions] as const // StDefItems
+  S extends ServiceRecord,
+>(...actions: Array<Action<C, E, I, EM, G, A, S>>) {
+  return [ExitSymbol, (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A, S>, null, actions] as const // StDefItems
 }
 
 type O_ExtractEvent<E extends EventBody, Et extends E['type']> = Et extends ChildDoneEType
@@ -168,10 +170,11 @@ type O_Transition<
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
+  S extends ServiceRecord,
 > = {
   to?: StateName
   guard?: OneOrMany<Guard<C, Ex, I, G>>
-  actions?: OneOrMany<Action<C, Ex, I, EM, G, A>>
+  actions?: OneOrMany<Action<C, Ex, I, EM, G, A, S>>
 }
 
 function on<
@@ -181,10 +184,11 @@ function on<
   EM extends EmittedEvent,
   const G extends Record<string, Placeholder>,
   const A extends Record<string, Placeholder>,
+  S extends ServiceRecord,
   Et extends [E] extends [never] ? string : E['type'] | Eb | never,
   Eb extends BuiltinEType = BuiltinEType,
->(eventType: Et, config: OneOrMany<Expand<O_Transition<C, O_ExtractEvent<E, Et>, I, EM, G, A>>>) {
-  return [eventType, (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A, Eb>, config as X_HiddenImpl] as const // StDefCoreItem, InvocationCleanupEvents
+>(eventType: Et, config: OneOrMany<Expand<O_Transition<C, O_ExtractEvent<E, Et>, I, EM, G, A, S>>>) {
+  return [eventType, (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A, S, Eb>, config as X_HiddenImpl] as const // StDefCoreItem, InvocationCleanupEvents
 }
 
 function subStates<
@@ -194,12 +198,12 @@ function subStates<
   EM extends EmittedEvent,
   const G extends Record<string, Placeholder>,
   const A extends Record<string, Placeholder>,
-  S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
+  S extends ServiceRecord,
   const D extends { [K in string]: StateDefinition<C, E, I, EM, G, A, S> },
   const Initial extends keyof D & string,
 >(stateDefinition: D, initialState?: Initial) {
   return [
-    (() => SubStatesSymbol) as X_DefTypeRefluxer<C, E, I, EM, G, A, BuiltinEType, S, typeof SubStatesSymbol>,
+    (() => SubStatesSymbol) as X_DefTypeRefluxer<C, E, I, EM, G, A, S, BuiltinEType, typeof SubStatesSymbol>,
     transformNormalizedDefinition(stateDefinition, initialState) as {
       initial: [Initial] extends [never] ? undefined : Initial
       stateOf: {
@@ -228,15 +232,15 @@ function parallel<
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
-  S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
+  S extends ServiceRecord,
   const PD extends {
     [K in string]:
-    | [Array<StDefCoreItem<C, E, I, EM, G, A>>, { [L in string]: StateDefinition<C, E, I, EM, G, A, S> }]
+    | [Array<StDefCoreItem<C, E, I, EM, G, A, S>>, { [L in string]: StateDefinition<C, E, I, EM, G, A, S> }]
     | [{ [L in string]: StateDefinition<C, E, I, EM, G, A, S> }?]
   },
 >(parallelDefinition: PD) {
   return [
-    (() => ParallelSymbol) as X_DefTypeRefluxer<C, E, I, EM, G, A, BuiltinEType, S, typeof ParallelSymbol>,
+    (() => ParallelSymbol) as X_DefTypeRefluxer<C, E, I, EM, G, A, S, BuiltinEType, typeof ParallelSymbol>,
     transformParallelNormalizedDefinition<C, E, I, EM, G, A, S>()<typeof parallelDefinition>(
       parallelDefinition,
     ) as unknown as {
@@ -259,25 +263,34 @@ function parallel<
   ] as const // StateDefinition
 }
 
+type OO_Target<Src, S extends ServiceRecord> = Src extends keyof S ? S[Src] : Src
 
-const invokeConfigProps = new Set(['id', 'input'])
-function o_isInvokeConfig(v: any): v is { id?: string; input?: unknown } {
-  if (typeof v !== 'object') return false
-  for (const key of Object.keys(v)) {
-    if (!invokeConfigProps.has(key)) return false
-  }
-  return true
+type O_InferIvkOutput<Src, S extends ServiceRecord> =
+  OO_Target<Src, S> extends infer T
+  ? T extends Machine<any, any, any, any, any, any, any, any, any>
+  ? ReturnType<Exclude<T['internal']['output'], undefined>>
+  : T extends AnyFn
+  ? Awaited<ReturnType<T>>
+  : never
+  : never
+
+type InvokeSrcExpr<TInput> =
+  | ((input: TInput, option: FnServiceOptions) => unknown)
+  | Machine<any, any, TInput, any, any, any, any, any, any>
+
+type InvokeConfig<
+  C extends MContext,
+  E extends EventBody,
+  I,
+  S extends ServiceRecord,
+  Src extends keyof S | InvokeSrcExpr<[SrcInput] extends [never] ? any : SrcInput>,
+  SrcInput,
+> = {
+  subKey?: string | number
+  input?: (
+    arg: FnBaseParams<C, E, I>[0],
+  ) => Src extends keyof S ? (S[Src] extends AnyFn ? Parameters<S[Src]>[0] : SrcInput) : SrcInput
 }
-
-type OO_IntoServiceFn<
-  Src,
-  S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
-> = Src extends AnyFn ? Src : Src extends keyof S ? S[Src] : never
-
-type O_InferOutput<Src, S extends Record<string, (input: any, option: ServiceOptions) => unknown>> =
-  Src extends Machine<any, any, any, any, any, any, any, any, any>
-  ? ReturnType<Exclude<Src['internal']['output'], undefined>>
-  : Awaited<ReturnType<OO_IntoServiceFn<Src, S>>>
 
 type InvocationCleanupEvents<
   C extends MContext,
@@ -285,10 +298,11 @@ type InvocationCleanupEvents<
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
+  S extends ServiceRecord,
   O,
 > = Array<
-  | readonly ['done', NoInfer<X_DefTypeRefluxer<C, { type: 'done'; output: O }, I, EM, G, A, never>>, X_HiddenImpl] // on
-  | readonly ['error', X_DefTypeRefluxer<C, { type: 'error'; error: Error }, I, EM, G, A, never>, X_HiddenImpl] // on
+  | readonly ['done', NoInfer<X_DefTypeRefluxer<C, { type: 'done'; output: O }, I, EM, G, A, S, never>>, X_HiddenImpl] // on
+  | readonly ['error', X_DefTypeRefluxer<C, { type: 'error'; error: Error }, I, EM, G, A, S, never>, X_HiddenImpl] // on
 >
 
 // Overloads:
@@ -299,27 +313,22 @@ function invoke<
   EM extends EmittedEvent,
   const G extends Record<string, Placeholder>,
   const A extends Record<string, Placeholder>,
-  S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
-  Src extends
-  | keyof S
-  | ((input: [SrcInput] extends [never] ? any : SrcInput, option: ServiceOptions) => unknown)
-  | Machine<any, any, [SrcInput] extends [never] ? any : SrcInput, any, any, any, any, any, any>,
+  S extends ServiceRecord,
+  Src extends keyof S | InvokeSrcExpr<[SrcInput] extends [never] ? any : SrcInput>,
   SrcInput = never,
 >(
-  config: {
-    id?: string
-    input?: (arg: FnBaseParams<C, E, I>[0]) => Src extends keyof S ? Parameters<S[Src]>[0] : SrcInput
-  },
-  src: Src,
-  ...cleanupEvents: InvocationCleanupEvents<C, I, EM, G, A, O_InferOutput<Src, S>>
+  service: Src,
+  config: InvokeConfig<C, E, I, S, Src, SrcInput>,
+  ...cleanupEvents: InvocationCleanupEvents<C, I, EM, G, A, S, O_InferIvkOutput<Src, S>>
 ): readonly [
   typeof InvokeSymbol,
-  X_DefTypeRefluxer<C, E, I, EM, G, A, BuiltinEType, S, unknown>,
+  X_DefTypeRefluxer<C, E, I, EM, G, A, S, BuiltinEType, unknown>,
   null,
   any,
   any,
-  InvocationCleanupEvents<C, I, EM, G, A, O_InferOutput<Src, S>>,
+  InvocationCleanupEvents<C, I, EM, G, A, S, O_InferIvkOutput<Src, S>>,
 ]
+
 function invoke<
   C extends MContext,
   E extends EventBody,
@@ -327,22 +336,18 @@ function invoke<
   EM extends EmittedEvent,
   const G extends Record<string, Placeholder>,
   const A extends Record<string, Placeholder>,
-  S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
-  Src extends
-  | keyof S
-  | ((input: [SrcInput] extends [never] ? any : SrcInput, option: ServiceOptions) => unknown)
-  | Machine<any, any, [SrcInput] extends [never] ? any : SrcInput, any, any, any, any, any, any>,
-  SrcInput = never,
+  S extends ServiceRecord,
+  Src extends keyof S | InvokeSrcExpr<any>,
 >(
-  src: Src,
-  ...cleanupEvents: InvocationCleanupEvents<C, I, EM, G, A, O_InferOutput<Src, S>>
+  service: Src,
+  ...cleanupEvents: InvocationCleanupEvents<C, I, EM, G, A, S, O_InferIvkOutput<Src, S>>
 ): readonly [
   typeof InvokeSymbol,
-  X_DefTypeRefluxer<C, E, I, EM, G, A, BuiltinEType, S, unknown>,
+  X_DefTypeRefluxer<C, E, I, EM, G, A, S, BuiltinEType, unknown>,
   null,
   any,
   any,
-  InvocationCleanupEvents<C, I, EM, G, A, O_InferOutput<Src, S>>,
+  InvocationCleanupEvents<C, I, EM, G, A, S, O_InferIvkOutput<Src, S>>,
 ]
 
 // Implementation:
@@ -353,42 +358,34 @@ function invoke<
   EM extends EmittedEvent,
   const G extends Record<string, Placeholder>,
   const A extends Record<string, Placeholder>,
-  S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
-  Src extends
-  | keyof S
-  | ((input: [SrcInput] extends [never] ? any : SrcInput, option: ServiceOptions) => unknown)
-  | Machine<any, any, [SrcInput] extends [never] ? any : SrcInput, any, any, any, any, any, any>,
+  S extends ServiceRecord,
+  Src extends keyof S | InvokeSrcExpr<[SrcInput] extends [never] ? any : SrcInput>,
   SrcInput = never,
 >(
+  service: Src,
   ...args:
     | [
-      config: {
-        id?: string
-        input?: (arg: FnBaseParams<C, E, I>[0]) => Src extends keyof S ? Parameters<S[Src]>[0] : SrcInput
-      },
-      src: Src,
-      ...cleanupEvents: InvocationCleanupEvents<C, I, EM, G, A, O_InferOutput<Src, S>>,
+      config: InvokeConfig<C, E, I, S, Src, SrcInput>,
+      ...cleanupEvents: InvocationCleanupEvents<C, I, EM, G, A, S, O_InferIvkOutput<Src, S>>,
     ]
-    | [src: Src, ...cleanupEvents: InvocationCleanupEvents<C, I, EM, G, A, O_InferOutput<Src, S>>]
+    | InvocationCleanupEvents<C, I, EM, G, A, S, O_InferIvkOutput<Src, S>>
 ) {
-  const [arg, ...rest] = args
-  let config = {},
-    src: any,
-    cleanupEvents: any
-  if (o_isInvokeConfig(arg)) {
-    config = arg
-      ;[src, ...cleanupEvents] = rest
-  } else {
-    src = arg
-    cleanupEvents = rest
-  }
+  const [config, cleanupEvents] = ((): [
+    InvokeConfig<C, E, I, S, Src, SrcInput>,
+    InvocationCleanupEvents<C, I, EM, G, A, S, O_InferIvkOutput<Src, S>>,
+  ] => {
+    if (!args.length) return [{}, []]
+    if (Array.isArray(args[0])) return [{}, args as any]
+    const [first, ...rest] = args
+    return [first, rest as any]
+  })()
 
   return [
     InvokeSymbol,
-    (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A, BuiltinEType, S>,
+    (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A, S, BuiltinEType>,
     null,
+    service as X_HiddenImpl,
     config as X_HiddenImpl,
-    src as X_HiddenImpl,
     cleanupEvents,
   ] as const // StateDefinition
 }
@@ -472,7 +469,7 @@ function x_parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateN
       case 'symbol': {
         switch (item[0]) {
           case InvokeSymbol: {
-            const rawSrc = item[4]
+            const rawSrc = item[3]
             const src: NormalizedSrc = (() => {
               switch (typeof rawSrc) {
                 case 'object':
@@ -484,15 +481,15 @@ function x_parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateN
               }
             })()
             const { invocations, internalEvents } = def
-            invocations.push({ ...item[3], src })
+            invocations.push({ ...item[4], src, mainKey: '' })
 
-            for (const [j, [ivkEType, _, cleanupEvents]] of item[5].entries()) {
+            for (const [j, [ivkEType, _, cleanupTransitions]] of item[5].entries()) {
               if (!(ivkEType === 'done' || ivkEType === 'error')) {
                 throw new Error(
                   `createMachine: Invocation event must be 'done' or 'error': ${ivkEType}, at state:"${stateName}"[${i}] > invoke events[${j}]`,
                 )
               }
-              const interm = ensureArray(cleanupEvents!)
+              const interm = ensureArray(cleanupTransitions!)
               if (!interm.length || interm.some((t) => !Object.keys(t).length)) {
                 throw new Error(
                   `createMachine: on(eventType, config): The 'config' argument is required, at state:"${stateName}"[${i}] > invoke events[${j}] event:"${ivkEType}"`,
@@ -553,9 +550,8 @@ function o_normalizeStates<const D extends Record<string, StateDefinition<any, a
           acc[stKey] = { def, sub } as any
         } catch (err) {
           if (err instanceof Error) {
-            throw new Error(`createMachine:(at state "${stKey}") ${err.name}: ${err.message}`,)
+            throw new Error(`createMachine:(at state "${stKey}") ${err.name}: ${err.message}`)
           }
-
         }
       } else {
         throw new Error(
@@ -602,12 +598,12 @@ function transformParallelNormalizedDefinition<
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
-  S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
+  S extends ServiceRecord,
 >() {
   return <
     const PD extends {
       [K in string]:
-      | [Array<StDefCoreItem<C, E, I, EM, G, A>>, Record<string, StateDefinition<C, E, I, EM, G, A, S>>]
+      | [Array<StDefCoreItem<C, E, I, EM, G, A, S>>, Record<string, StateDefinition<C, E, I, EM, G, A, S>>]
       | [Record<string, StateDefinition<C, E, I, EM, G, A, S>>?]
     },
   >(
@@ -622,7 +618,7 @@ function transformParallelNormalizedDefinition<
         }
         const len = rawDefinition.length
         const leafDefOf = (rawDefinition[len - 1] || {}) as Record<string, StateDefinition<C, E, I, EM, G, A, S>>
-        const regionStDefCoreItems = (rawDefinition[len - 2] || []) as Array<StDefCoreItem<C, E, I, EM, G, A>>
+        const regionStDefCoreItems = (rawDefinition[len - 2] || []) as Array<StDefCoreItem<C, E, I, EM, G, A, S>>
 
         const { def } = x_parseStDefItems(regionStDefCoreItems, regionName)
         return [
@@ -644,10 +640,9 @@ function transformParallelNormalizedDefinition<
 
 // ===
 
-function o_setPPathAndInvocationIdThenAddCatalog(
+function o_setPPathAndInvocationMainKeyThenAddCatalog(
   nStItemRecord: NormalizedDefinition['stateOf'] | ParallelNormalizedDefinition['stateOf'],
   parent: string,
-  invokeIds: Set<string>,
   addToCatalog: (stPath: string, state: NormalizedStateItemBoth) => unknown,
   isRegion: boolean,
   addRegionPath: (regionPath: string) => unknown,
@@ -657,12 +652,7 @@ function o_setPPathAndInvocationIdThenAddCatalog(
     def.pPath = parent
     const stPath = `${parent}${ST_DELIM}${key}`
     for (const [i, e] of def.invocations.entries()) {
-      const id = e.id || `${stPath}[${i}]`
-      e.id = id
-      if (invokeIds.has(id)) {
-        throw new Error(`createMachine: Duplicate invoke id: ${id}, at state:"${stPath}"`)
-      }
-      invokeIds.add(id)
+      e.mainKey = e.src.type === 'string' ? e.src.value : `${stPath}[${i}]`
     }
     addToCatalog(stPath, nState)
     if (isRegion) {
@@ -670,7 +660,7 @@ function o_setPPathAndInvocationIdThenAddCatalog(
     }
     if (sub) {
       const isParallel = 'dType' in sub && sub.dType === 'regions'
-      o_setPPathAndInvocationIdThenAddCatalog(sub.stateOf, stPath, invokeIds, addToCatalog, isParallel, addRegionPath)
+      o_setPPathAndInvocationMainKeyThenAddCatalog(sub.stateOf, stPath, addToCatalog, isParallel, addRegionPath)
     }
   }
 }
@@ -764,7 +754,7 @@ function getDefinitionAndCatalog<
   const I,
   const EM extends EmittedEvent,
   const O,
-  const S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
+  const S extends ServiceRecord,
   const D extends { [K in string]: StateDefinition<C, E, I, EM, G, A, S> },
   const G extends Record<string, Placeholder> = Record<string, Placeholder>,
   const A extends Record<string, Placeholder> = Record<string, Placeholder>,
@@ -807,10 +797,9 @@ function getDefinitionAndCatalog<
   // Setup stateCatalog and regionPaths
   const stateCatalog = new Map<string, NormalizedStateItemBoth>()
   const regionPaths: string[] = []
-  o_setPPathAndInvocationIdThenAddCatalog(
+  o_setPPathAndInvocationMainKeyThenAddCatalog(
     stateOf,
     '',
-    new Set<string>(),
     (stPath: string, state: NormalizedStateItemBoth) => stateCatalog.set(stPath, state),
     false,
     (regionPath: string) => regionPaths.push(regionPath),
@@ -847,7 +836,7 @@ export function createMachine<
   const I,
   const EM extends EmittedEvent,
   const O,
-  const S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
+  const S extends ServiceRecord,
   const D extends { [K in string]: StateDefinition<C, E, I, EM, G, A, S> },
   const G extends Record<string, Placeholder> = Record<string, Placeholder>,
   const A extends Record<string, Placeholder> = Record<string, Placeholder>,
@@ -890,7 +879,7 @@ function provide<
   O,
   const G extends Record<string, Placeholder>,
   const A extends Record<string, Placeholder>,
-  const S extends Record<string, (input: any, option: ServiceOptions) => unknown>,
+  const S extends ServiceRecord,
   ND extends NormalizedDefinition,
   const nS extends Record<string, (input: any) => unknown>,
   const nG extends Record<string, Placeholder> = Record<string, Placeholder>,
