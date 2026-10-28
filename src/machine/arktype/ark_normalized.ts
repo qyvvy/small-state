@@ -40,6 +40,7 @@ const o_NormalizedInvocations = type({
   mainKey: 'string',
   'subKey?': 'string|number',
   'input?': AnyFn,
+  emittedETypesToListen: 'string[]',
   src: type.or(
     { type: '"function"', value: AnyFn },
     { type: '"string"', value: 'string' },

@@ -26,8 +26,8 @@ describe('rt_main_invoke', () => {
         loading: [
           invoke(
             () => d.promise,
-            on('done', { to: 'success', actions: ({ update, e }) => update({ user: e.output }) }),
-            on('error', { to: 'failure' }),
+            on(':done:', { to: 'success', actions: ({ update, e }) => update({ user: e.output }) }),
+            on(':error:', { to: 'failure' }),
           ),
         ],
         success: null,
@@ -56,8 +56,8 @@ describe('rt_main_invoke', () => {
             () => {
               throw err
             },
-            on('done', { to: 'success' }),
-            on('error', { to: 'failure', actions: ({ update, e }) => update({ error: e.error }) }),
+            on(':done:', { to: 'success' }),
+            on(':error:', { to: 'failure', actions: ({ update, e }) => update({ error: e.error }) }),
           ),
         ],
         success: null,
@@ -83,8 +83,8 @@ describe('rt_main_invoke', () => {
             async () => {
               throw err
             },
-            on('done', { to: 'success' }),
-            on('error', { to: 'failure', actions: ({ update, e }) => update({ error: e.error }) }),
+            on(':done:', { to: 'success' }),
+            on(':error:', { to: 'failure', actions: ({ update, e }) => update({ error: e.error }) }),
           ),
         ],
         success: null,
@@ -109,7 +109,7 @@ describe('rt_main_invoke', () => {
             async () => {
               throw Error()
             },
-            on('done', { to: 'success' }),
+            on(':done:', { to: 'success' }),
           ),
         ],
         success: null,
@@ -157,8 +157,8 @@ describe('rt_main_invoke', () => {
           loading: [
             invoke(
               src,
-              on('done', { to: 'success', actions: ({ update, e }) => update({ user: e.output }) }),
-              on('error', { to: 'failure' }),
+              on(':done:', { to: 'success', actions: ({ update, e }) => update({ user: e.output }) }),
+              on(':error:', { to: 'failure' }),
             ),
             on('cancel', { to: 'idle' }),
           ],
@@ -244,13 +244,13 @@ describe('rt_main_invoke', () => {
           parallel({
             a: [
               {
-                pending: [invoke(() => a.promise, on('done', { to: 'done' }))],
+                pending: [invoke(() => a.promise, on(':done:', { to: 'done' }))],
                 done: null,
               },
             ],
             b: [
               {
-                pending: [invoke(() => b.promise, on('done', { to: 'done' }))],
+                pending: [invoke(() => b.promise, on(':done:', { to: 'done' }))],
                 done: null,
               },
             ],
@@ -293,7 +293,7 @@ describe('rt_main_invoke', () => {
           running: [
             invoke(
               key,
-              on('done', { to: 'finished', actions: ({ update, e }) => update({ total: e.output.total }) }),
+              on(':done:', { to: 'finished', actions: ({ update, e }) => update({ total: e.output.total }) }),
             ),
             on('abort', { to: 'aborted' }),
           ],

@@ -1,14 +1,15 @@
 import type {
+  BuiltinEventBody,
   EmittedEvent,
   EventBody,
   FnBaseParams,
   InternalEPayload,
-  InternalEventBody,
   Machine,
   MContext,
   NormalizedAction,
   NormalizedDefinition,
   ServiceRecord,
+  SystemEventBody,
 } from '../machine/m.types'
 import { MICROSTEP_LOOP_LIMIT, ST_DELIM } from '../shared/constants'
 import type { Placeholder } from '../shared/general.types'
@@ -26,11 +27,11 @@ import {
   updateStateRouteForEntry,
 } from './runtime_step.core'
 
-function execTExecActions<Ep extends EventBody>(
+function execTExecActions<Eo extends EventBody>(
   tExecs: TransitionExec[],
-  actionRunner: ReturnType<typeof readyAction<any, any, any, any, any, any, any>>,
+  actionRunner: ReturnType<typeof readyAction<any, any, any, any, any, any, any, any>>,
   errLocation: string,
-  providedEvent?: Ep,
+  internalQueueEvent?: Eo,
 ) {
   const { execAction, processQueue } = actionRunner
 
@@ -38,7 +39,7 @@ function execTExecActions<Ep extends EventBody>(
   try {
     for (const tExec of tExecs) {
       for ([i, action] of tExec.transition.actions.entries()) {
-        execAction(action, providedEvent)
+        execAction(action, internalQueueEvent)
         processQueue()
       }
     }
@@ -73,7 +74,7 @@ export function initRuntime<
   const { definition, guards, actions } = machineInternal
   const { initial } = definition
 
-  const actionRunner = readyAction<C, E, I, EM, G, A, S>(realContext, event, input, guards, actions, rtOutbound)
+  const actionRunner = readyAction<C, E, I, EM, G, A, S, E>(realContext, event, input, guards, actions, rtOutbound)
 
   const tExecs: TransitionExec[] = [
     {
@@ -92,7 +93,7 @@ export function initRuntime<
 export function macrostep<
   C extends MContext,
   E extends EventBody,
-  Ex extends E | InternalEventBody,
+  Ex extends E | BuiltinEventBody | SystemEventBody,
   I,
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
@@ -121,13 +122,7 @@ export function macrostep<
 
   execTExecActions(tExecs, actionRunner, 'transition')
 
-  const hasTransitioned = runMicrosteps(
-    tExecs,
-    crrStates,
-    actionRunner,
-    machineInternal,
-    rtOutbound,
-  )
+  const hasTransitioned = runMicrosteps(tExecs, crrStates, actionRunner, machineInternal, rtOutbound)
 
   {
     const { context } = actionRunner.getResult()
@@ -138,7 +133,7 @@ export function macrostep<
 function runMicrosteps<
   C extends MContext,
   E extends EventBody,
-  Ex extends E | InternalEventBody,
+  Ex extends E | BuiltinEventBody | SystemEventBody,
   I,
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
@@ -180,14 +175,8 @@ function runMicrosteps<
     execTExecActions(internalTExecs, actionRunner, event.type, event)
 
     hasTransitioned =
-      runExitAndEntryThenAlways(
-        internalTExecs,
-        crrStates,
-        actionRunner,
-        machineInternal,
-        rtOutbound,
-        internalQueue,
-      ) || hasTransitioned
+      runExitAndEntryThenAlways(internalTExecs, crrStates, actionRunner, machineInternal, rtOutbound, internalQueue) ||
+      hasTransitioned
   }
 
   return hasTransitioned
@@ -196,7 +185,7 @@ function runMicrosteps<
 function runExitAndEntryThenAlways<
   C extends MContext,
   E extends EventBody,
-  Ex extends E | InternalEventBody,
+  Ex extends E | BuiltinEventBody | SystemEventBody,
   I,
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
@@ -242,7 +231,7 @@ function runExitAndEntryThenAlways<
 function exitAndEntry<
   C extends MContext,
   E extends EventBody,
-  Ex extends E | InternalEventBody,
+  Ex extends E | BuiltinEventBody | SystemEventBody,
   I,
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,

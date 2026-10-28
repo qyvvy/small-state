@@ -29,7 +29,7 @@ describe('rt_main_emit', () => {
   test('0:inc で incremented が emit される', async () => {
     const rt = createRuntime(counterMachine).start()
     const handler = jest.fn()
-    rt.on('incremented', handler)
+    rt.onEmitted('incremented', handler)
     rt.send({ type: 'inc' })
 
     expect(handler).toHaveBeenCalledTimes(1)
@@ -39,7 +39,7 @@ describe('rt_main_emit', () => {
   test('0:複数回 send すると、その回数だけ emit される', async () => {
     const rt = createRuntime(counterMachine).start()
     const handler = jest.fn()
-    rt.on('incremented', handler)
+    rt.onEmitted('incremented', handler)
     rt.send({ type: 'inc' })
     rt.send({ type: 'inc' })
 
@@ -49,7 +49,7 @@ describe('rt_main_emit', () => {
   test('0:reset では emit されない', async () => {
     const rt = createRuntime(counterMachine).start()
     const handler = jest.fn()
-    rt.on('incremented', handler)
+    rt.onEmitted('incremented', handler)
     rt.send({ type: 'reset' })
 
     expect(handler).not.toHaveBeenCalled()
@@ -58,7 +58,7 @@ describe('rt_main_emit', () => {
   test('0:unsubscribe 後は呼ばれない', async () => {
     const rt = createRuntime(counterMachine).start()
     const handler = jest.fn()
-    const sub = rt.on('incremented', handler)
+    const sub = rt.onEmitted('incremented', handler)
     rt.send({ type: 'inc' })
     sub.unsubscribe()
     rt.send({ type: 'inc' })

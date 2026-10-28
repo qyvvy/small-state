@@ -1,18 +1,17 @@
 import type {
+  BuiltinEventBody,
   EmittedEvent,
   EventBody,
   FnBaseParams,
-  InternalEventBody,
   LimitedActionFnParams,
   Machine,
   MContext,
   NormalizedTransition,
   ParamsInput,
 } from '../machine/m.types'
-import type { AnyFn, RecursiveRecord } from '../shared/general.types'
+import type { AnyFn } from '../shared/general.types'
 import { isPlainObject } from '../shared/utils'
 import type { StateRoute } from './r.types'
-
 
 type MachineGuardFn<C extends MContext, E extends EventBody, I> = (...args: FnBaseParams<C, E, I>) => boolean
 
@@ -23,7 +22,7 @@ type MachineActionFn<C extends MContext, E extends EventBody, I, EM extends Emit
 function x_resolveActionElement<
   TMachineFn extends MachineGuardFn<C, E, I> | MachineActionFn<C, E, I, EM>,
   C extends MContext,
-  E extends EventBody | InternalEventBody,
+  E extends EventBody | BuiltinEventBody,
   I,
   EM extends EmittedEvent = EmittedEvent,
   TTypeArg = Parameters<TMachineFn>[0],
@@ -59,7 +58,7 @@ function x_resolveActionElement<
 
 export function resolveGuardElement<
   C extends MContext,
-  E extends EventBody | InternalEventBody,
+  E extends EventBody | BuiltinEventBody,
   I,
   TMachineFn extends MachineGuardFn<C, E, I> = MachineGuardFn<C, E, I>,
 >(
@@ -75,7 +74,7 @@ export function resolveGuardElement<
 
 export function resolveActionElement<
   C extends MContext,
-  Ex extends EventBody | InternalEventBody,
+  Ex extends EventBody | BuiltinEventBody,
   I,
   EM extends EmittedEvent,
   TTypeArg = LimitedActionFnParams<C, Ex, I, EM>[0],
@@ -108,11 +107,11 @@ export function readyToEvalGuard<C extends MContext, Ex extends EventBody, I>(
   }
 }
 
-
 // 第二引数に指定した道順に沿って、第一引数を辿る関数
 export function traverseStateRouteMatch(
-  stateRoute: StateRoute, stPathSplitted: string[]
-): { isExhausted: boolean, endIdx: number, remaining?: [StateRoute, startIdx: number, asRootpath?: boolean] } {
+  stateRoute: StateRoute,
+  stPathSplitted: string[],
+): { isExhausted: boolean; endIdx: number; remaining?: [StateRoute, startIdx: number, asRootpath?: boolean] } {
   let focusedRoute = stateRoute
   let routeIdx = 0
   const len = stPathSplitted.length

@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, jest, test } from 'bun:test'
-import { __test__ } from '../createMachine'
+import { __test__, createMachine } from '../createMachine'
 
 const { getDefinitionAndCatalog } = __test__
 
@@ -149,7 +149,7 @@ describe('machine', () => {
           },
           () => ({}),
         ),
-      ).toThrow(/Invalid state definition:/)
+      ).toThrow(/No states in machine definition./)
     })
 
     test('2.1: null を終点と見なすが、空配列は終点と見なさない', async () => {
@@ -1371,6 +1371,9 @@ describe('machine', () => {
           services: {
             increment: async (count: number) => count + 1,
             log: async (msg: string) => console.log(msg),
+            subMachine: createMachine({
+              types: { emitted: {} as { type: 'EMITTED1' } | { type: 'EMITTED2' } }
+            }, () => ({ foo: [] }))
           },
         },
         ({ on, invoke, subStates }) => ({
@@ -1378,11 +1381,11 @@ describe('machine', () => {
             invoke(
               'increment',
               { input: ({ c }) => c.count },
-              on('done', {
+              on(':done:', {
                 to: 'state2',
                 actions: ({ e, update }) => update({ count: e.output }),
               }),
-              on('error', {
+              on(':error:', {
                 to: 'state3',
                 actions: ({ e }) => e.error,
               }),
@@ -1390,7 +1393,7 @@ describe('machine', () => {
             invoke(
               async (count) => 'aiu' as const,
               { input: ({ c }) => c.count },
-              on('done', {
+              on(':done:', {
                 to: 'state2',
                 actions: ({ e, update, c }) => {
                   update({
@@ -1398,7 +1401,7 @@ describe('machine', () => {
                   })
                 },
               }),
-              on('error', {
+              on(':error:', {
                 to: 'state3',
                 actions: ({ e }) => e.error,
               }),
@@ -1411,14 +1414,19 @@ describe('machine', () => {
                 invoke(
                   'increment',
                   { subKey: 'state2-invocation', input: ({ c }) => c.count },
-                  on('done', {
+                  on(':done:', {
                     to: 'subState2',
                     actions: ({ e, update, c }) => {
                       update({ count: e.output })
                     },
                   }),
-                  on('error', { actions: ({ e }) => e.error }),
+                  on(':error:', { actions: ({ e }) => e.error }),
                 ),
+                invoke(
+                  'subMachine',
+                  on('EMITTED1', { actions: () => { } }),
+                  on('EMITTED2', { actions: () => { } }),
+                )
               ],
               subState2: null,
             }),
@@ -1448,28 +1456,30 @@ describe('machine', () => {
                 {
                   mainKey: 'increment',
                   input: expect.any(Function),
+                  emittedETypesToListen: [],
                   src: { type: 'string', value: 'increment' },
                 },
                 {
                   mainKey: '/state1[1]',
                   input: expect.any(Function),
+                  emittedETypesToListen: [],
                   src: { type: 'function', value: expect.any(Function) },
                 },
               ],
               internalEvents: {
-                'invoke/done[0]': {
+                'invoke/:done:[0]': {
                   cond: expect.any(Function),
                   transitions: [{ to: 'state2', fullTo: '/state2', actions: [expect.any(Function)], guards: [] }],
                 },
-                'invoke/error[0]': {
+                'invoke/:error:[0]': {
                   cond: expect.any(Function),
                   transitions: [{ to: 'state3', fullTo: '/state3', actions: [expect.any(Function)], guards: [] }],
                 },
-                'invoke/done[1]': {
+                'invoke/:done:[1]': {
                   cond: expect.any(Function),
                   transitions: [{ to: 'state2', fullTo: '/state2', actions: [expect.any(Function)], guards: [] }],
                 },
-                'invoke/error[1]': {
+                'invoke/:error:[1]': {
                   cond: expect.any(Function),
                   transitions: [{ to: 'state3', fullTo: '/state3', actions: [expect.any(Function)], guards: [] }],
                 },
@@ -1500,20 +1510,37 @@ describe('machine', () => {
                         mainKey: 'increment',
                         subKey: 'state2-invocation',
                         input: expect.any(Function),
+                        emittedETypesToListen: [],
                         src: { type: 'string', value: 'increment' },
                       },
+                      {
+                        mainKey: 'subMachine',
+                        emittedETypesToListen: [
+                          'EMITTED1',
+                          'EMITTED2',
+                        ],
+                        src: { type: 'string', value: 'subMachine' },
+                      }
                     ],
                     internalEvents: {
-                      'invoke/done[0]': {
+                      'invoke/:done:[0]': {
                         cond: expect.any(Function),
                         transitions: [
                           { to: 'subState2', fullTo: '/state2/subState2', actions: [expect.any(Function)], guards: [] },
                         ],
                       },
-                      'invoke/error[0]': {
+                      'invoke/:error:[0]': {
                         cond: expect.any(Function),
                         transitions: [{ actions: [expect.any(Function)], guards: [] }],
                       },
+                      'invoke/EMITTED1[1]': {
+                        cond: expect.any(Function),
+                        transitions: [{ actions: [expect.any(Function)], guards: [] }],
+                      },
+                      'invoke/EMITTED2[1]': {
+                        cond: expect.any(Function),
+                        transitions: [{ actions: [expect.any(Function)], guards: [] }],
+                      }
                     },
                   },
                   sub: null,
@@ -1575,7 +1602,7 @@ describe('machine', () => {
             initContext: () => ({ count: 1 }),
           },
           ({ on, invoke }) => ({
-            state1: [invoke(() => null, on('done', { to: 'state2' }), on('error', { to: 'hoge' }))],
+            state1: [invoke(() => null, on(':done:', { to: 'state2' }), on(':error:', { to: 'hoge' }))],
             state2: null,
           }),
         ),

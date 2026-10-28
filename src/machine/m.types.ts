@@ -1,4 +1,4 @@
-import type { AnyFn, Expand, Merge, Placeholder, Values } from '../shared/general.types'
+import type { AnyFn, EmptyRecord, Expand, IsAny, IsEqual, LowInfer, Merge, Placeholder, Values } from '../shared/general.types'
 
 
 export const EntrySymbol: unique symbol = Symbol('Entry')
@@ -8,13 +8,22 @@ export const ParallelSymbol: unique symbol = Symbol('Parallel')
 export const InvokeSymbol: unique symbol = Symbol('Invoke')
 
 
-export type ChildDoneEventBody = { type: ':childDone:', output: unknown }
-export type ChildDoneEType = ChildDoneEventBody['type']
-export type BuiltinEType = ':always:' | ChildDoneEType
+export type ChildDoneEBody = { type: ':childDone:', output: unknown }
+export type BuiltinEType = ':always:' | ChildDoneEBody['type']
+export type BuiltinEventBody = { type: BuiltinEType;[key: string]: any }
+export type IvkDoneEBody<O> = { type: ':done:', output: O }
+export type IvkErrorEBody = { type: ':error:', error: unknown }
 
-export type InternalEType = BuiltinEType | `invoke/done[${number}]` | `invoke/error[${number}]`
-export type InternalEventBody = { type: InternalEType;[key: string]: any }
-export type InternalEPayload = { path: string }
+export const SystemEventSymbol: unique symbol = Symbol('SystemEvent')
+export type SystemEventBody =
+  | {
+    type: `invoke/${string}[${number}]`
+    [SystemEventSymbol]: true
+    payload: { type: string;[key: string]: any }
+  }
+  | { type: `system/${string}` }
+export type InternalEType = BuiltinEType | SystemEventBody['type']
+export type InternalEPayload = { path: string } | EmptyRecord
 
 export type MContext = Record<string, any>
 export type EventBody = { type: string;[key: string]: any }
@@ -46,7 +55,7 @@ export type ActionFnParams<
     enqueue: EnqueueFn<C, Ex, I, EM, A>
     update: UpdateFn<C>
     sendTo: SendToFn<S>
-    emit: (emittedEvent: EM) => unknown
+    emit: EmitFn<EM>
   }
 >
 export type LimitedActionFnParams<
@@ -57,7 +66,7 @@ export type LimitedActionFnParams<
   Prm = any
 > = FnBaseParams<C, E, I, {
   update: UpdateFn<C>,
-  emit: (emittedEvent: EM) => unknown
+  emit: EmitFn<EM>
 }, Prm>
 
 export type CheckFn<
@@ -69,6 +78,11 @@ export type CheckFn<
   ): boolean
 }
 
+/**
+ * enqueue(type: {[KeyOfAction: string]: ParamsOfAction}): void
+ * enqueue(type: KeyOfAction, params?: ParamsOfAction): void
+ * enqueue(fn: (arg: FnBaseParams & {update: UpdateFn, emit: EmitFn}) => void): void
+ */
 export type EnqueueFn<
   C extends MContext, Ex extends EventBody, I, EM extends EmittedEvent, A extends Record<string, Placeholder>
 > = {
@@ -120,14 +134,15 @@ export type NormalizedTransition = {
 }
 
 export type NormalizedSrc =
-  | { type: 'function', value: AnyFn }
+  | { type: 'function', value: ServiceFn }
   | { type: 'string', value: string }
   | { type: 'machine', value: Machine<any, any, any, any, any, any, any, any, any> }
 
 export type NormalizedInvocation = {
   mainKey: string
-  input?: AnyFn
   subKey?: string | number
+  input?: AnyFn
+  emittedETypesToListen: string[]
   src: NormalizedSrc
 }
 
@@ -183,9 +198,13 @@ export type ParamsInputArgsOf<
 
 
 
-export type FnServiceOptions = { signal: AbortSignal }
+export type ServiceFnOptions<fEM extends EmittedEvent = EmittedEvent> = { signal: AbortSignal, emit: EmitFn<fEM> }
+export type ServiceFn<
+  Op extends ServiceFnOptions<EmittedEvent> = ServiceFnOptions<EmittedEvent>, TInput = any
+> =
+  ((input: TInput, option: Op) => (unknown | AnyFn))
 export type ServiceRecord = Record<string,
-  | ((input: any, option: FnServiceOptions) => unknown)
+  | ServiceFn
   | Machine<any, any, any, any, any, any, any, any, any>
 >
 
@@ -202,7 +221,7 @@ export type MachineConfig<
   types?: { context?: C; events?: E; emitted?: EM; input?: I; output?: O }
   name?: string
   initialState?: StateName
-  initContext?: (input: I) => C
+  initContext?: (input: I) => LowInfer<C>
   output?: (arg: FnBaseParams<C, E, I>[0]) => O // マシンが最終状態になったときに実行される
   guards?: { [K in keyof G]: (arg: FnBaseParams<C, E, I>[0], params: G[K]) => boolean }
   actions?: { [K in keyof A & string]: (arg: LimitedActionFnParams<C, E, I, EM>[0], params: A[K]) => unknown }
@@ -231,9 +250,9 @@ export type Machine<
     [MachineSymbol]: true
     initContext: undefined | ((input: I) => C)
     output: undefined | ((arg: FnBaseParams<C, E, I, unknown>[0]) => O) // マシンが最終状態になったときに実行される
-    guards: { [K in keyof G]: (arg: FnBaseParams<C, E | InternalEventBody, I>[0], params: G[K]) => boolean }
+    guards: { [K in keyof G]: (arg: FnBaseParams<C, E | BuiltinEventBody, I>[0], params: G[K]) => boolean }
     actions: {
-      [K in keyof A]: (arg: LimitedActionFnParams<C, E | InternalEventBody, I, EM>[0], params: A[K]) => unknown
+      [K in keyof A]: (arg: LimitedActionFnParams<C, E | BuiltinEventBody, I, EM>[0], params: A[K]) => unknown
     }
     services: S
     definition: ND
@@ -246,9 +265,9 @@ export type Machine<
     const nA extends Record<string, Placeholder> = Record<string, Placeholder>,
   >(
     implementations: {
-      guards?: { [K in keyof nG]: (arg: FnBaseParams<C, E | InternalEventBody, I>[0], params: nG[K]) => boolean },
+      guards?: { [K in keyof nG]: (arg: FnBaseParams<C, E | BuiltinEventBody, I>[0], params: nG[K]) => boolean },
       actions?: {
-        [K in keyof nA]: (arg: LimitedActionFnParams<C, E | InternalEventBody, I, EM>[0], params: nA[K]) => unknown
+        [K in keyof nA]: (arg: LimitedActionFnParams<C, E | BuiltinEventBody, I, EM>[0], params: nA[K]) => unknown
       }
       services?: nS
     }

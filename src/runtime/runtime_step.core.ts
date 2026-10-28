@@ -1,5 +1,6 @@
 import type {
   ActionFnParams,
+  BuiltinEventBody,
   CheckFn,
   EmittedEvent,
   EnqueueFn,
@@ -8,7 +9,6 @@ import type {
   InferEventBody,
   InternalEPayload,
   InternalEType,
-  InternalEventBody,
   LimitedActionFnParams,
   Machine,
   MContext,
@@ -23,16 +23,19 @@ import type {
   ParamsInput,
   ParamsInputArgsOf,
   SendToFn,
+  ServiceFn,
   ServiceRecord,
+  SystemEventBody,
   TopLvStDefItem,
   UpdateFn,
   UpdateFnParam,
 } from '../machine/m.types'
+import { SystemEventSymbol } from '../machine/m.types'
 import { ST_DELIM } from '../shared/constants'
 import type { Placeholder, RecursiveRecord, Values } from '../shared/general.types'
 import { deepFreeze, parentPathOf, splitStPath } from '../shared/utils'
 import { createRuntime, Runtime } from './Runtime'
-import type { RuntimeOutbound, StateRoute } from './r.types'
+import type { Children, RuntimeOutbound, StateRoute } from './r.types'
 import {
   readyToEvalGuard,
   resolveActionElement,
@@ -218,7 +221,6 @@ function x_findDeepestTransitions(
   const { parallel, regions } = stateNameOrParallel
   const parallelRoot = `${parentPath}${ST_DELIM}${parallel}`
   activeParallelSet.add(parallelRoot)
-  //const parallels = higherParallels.concat(parallelRoot)
   const accTCandidates: X_TransitionCandidate[] = []
   const accLeaves: string[] = [] // leaves になる
   for (const key in regions) {
@@ -251,6 +253,12 @@ function x_findDeepestTransitions(
 
 // ==
 
+function o_unwrapSystemEvent(
+  event: EventBody | BuiltinEventBody | SystemEventBody
+): EventBody | BuiltinEventBody {
+  return (!(SystemEventSymbol in event && event.payload)) ? event : event.payload
+}
+
 function o_evalActionParams<C extends MContext, Ex extends EventBody, I>(
   param: unknown | ((arg: FnBaseParams<C, Ex, I>[0]) => unknown),
   context: C,
@@ -268,19 +276,21 @@ export function readyAction<
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends ServiceRecord,
-  Ex extends E | InternalEventBody = E | InternalEventBody,
+  Exr extends E | BuiltinEventBody | SystemEventBody,
+  Ex extends E | BuiltinEventBody = Exclude<Exr, SystemEventBody>
 >(
   origContext: C,
-  event: Ex,
+  rawEvent: Exr,
   input: I,
   machineGuards: Machine<C, E, I, any, any, any, any, any, any>['internal']['guards'],
   machineActions: Machine<C, E, I, EM, any, any, any, any, any>['internal']['actions'],
   rtOutbound: RuntimeOutbound<E, EM, S>,
 ) {
+  const event = o_unwrapSystemEvent(rawEvent) as Ex
   const { emit } = rtOutbound
   let context = deepFreeze(origContext)
   let updateApplications: UpdateFnParam<C>[] = []
-  let enqueuees: {
+  let enqActions: {
     fn: (...arg: LimitedActionFnParams<C, Ex, I, EM>) => unknown
     params: any
   }[] = []
@@ -348,7 +358,7 @@ export function readyAction<
       throw new Error('Nested enqueue operations are not supported.')
     }
     const [fn, params] = resolveActionElement<C, Ex, I, EM>(type, machineActions, args?.[0])
-    enqueuees.push({ fn, params })
+    enqActions.push({ fn, params })
   }
 
   let saveContext = origContext
@@ -363,15 +373,15 @@ export function readyAction<
       return saveFnBaseParam
     },
 
-    execAction<Exx extends Ep extends undefined ? Ex : any, Ep extends EventBody | undefined = undefined>(
+    execAction<Exx extends Eo extends undefined ? Ex : any, Eo extends EventBody | undefined = undefined>(
       transitionAction: NormalizedAction<C, Ex, I, EM, G, A, S>,
-      providedEvent?: Ep,
+      eventOverride?: Eo,
     ) {
       const bodies = resolveActionElement<C, Ex, I, EM, ActionFnParams<C, Ex, I, EM, G, A, S>[0]>(
         transitionAction,
         machineActions,
       )
-      const qEvent = (providedEvent || event) as Exx
+      const qEvent = !eventOverride ? event : o_unwrapSystemEvent(eventOverride) as Exx
       if (bodies.length === 1) {
         bodies[0]({
           context,
@@ -399,7 +409,7 @@ export function readyAction<
       // enqueue 中で enqueue したら警告する
       isProcessingQueue = true
       try {
-        for (const { fn, params } of enqueuees) {
+        for (const { fn, params } of enqActions) {
           fn(
             { context, c: context, event, e: event, input, update, emit },
             o_evalActionParams(params, context, event, input),
@@ -407,7 +417,7 @@ export function readyAction<
           applyUpdate()
         }
       } finally {
-        enqueuees = []
+        enqActions = []
         isProcessingQueue = false
       }
     },
@@ -682,16 +692,44 @@ export function* updateStateRouteForEntry(
   )
 }
 
+function o_handleInvokedFnResult(
+  output: unknown,
+  path: string,
+  invocationIdx: number,
+  abortController: AbortController,
+  rtOutbound: RuntimeOutbound<any, any, any>,
+  setChild: (value: Children<any>[string]) => void,
+) {
+  const { signal } = abortController
+  if (typeof output === 'function') {
+    signal.aborted ? output() : setChild({
+      stop: () => {
+        abortController.abort()
+        output()
+      },
+    })
+  } else if (!signal.aborted) {
+    rtOutbound.enqueueEvent(
+      {
+        type: `invoke/:done:[${invocationIdx}]` as const,
+        payload: { type: ':done:', output },
+        [SystemEventSymbol]: true
+      },
+      { path },
+    )
+  }
+}
+
 export function launchInvocations<E extends EventBody, S extends ServiceRecord>(
   invocations: NormalizedInvocation[],
   path: string,
   makeFnBaseParam: () => FnBaseParams<any, any, any>[0],
-  machineServices: Machine<any, any, any, any, any, any, any, any, any>['internal']['services'],
+  machineServices: ServiceRecord,
   rtOutbound: RuntimeOutbound<E, any, S>,
 ) {
   const { enqueueEvent } = rtOutbound
   const fnBaseParam = makeFnBaseParam()
-  for (const [i, { input, mainKey, subKey, src }] of invocations.entries()) {
+  for (const [i, { input, mainKey, subKey, src, emittedETypesToListen }] of invocations.entries()) {
     const [srcType, srcValue] = (() => {
       const { type, value } = src
       if (type !== 'string') {
@@ -706,39 +744,71 @@ export function launchInvocations<E extends EventBody, S extends ServiceRecord>(
     if (rtOutbound.children[childKey]) {
       throw new Error(`Service with ID '${childKey}' is already running.`)
     }
+    const setChild = (value: Children<any>[string]) => {
+      rtOutbound.children = { ...rtOutbound.children, [childKey]: value }
+    }
     const inputValue = input && typeof input === 'function' ? input(fnBaseParam) : undefined
 
     switch (srcType) {
+      case 'machine': {
+        const childRt = createRuntime(srcValue as Machine<any, any, any, any, any, any, any, any, any>, {
+          id: `${rtOutbound.id}/${childKey}`,
+          input: () => inputValue,
+        })
+        setChild(childRt)
+        childRt.subscribe(({ runtimeStatus, output }) => {
+          if (runtimeStatus === 'done') {
+            enqueueEvent({
+              type: `invoke/:done:[${i}]` as const,
+              payload: { type: ':done:', output },
+              [SystemEventSymbol]: true,
+            }, { path })
+          }
+          // TODO: 'invoke/:error:'
+        })
+        for (const eType of emittedETypesToListen) {
+          childRt.onEmitted(eType, (emittedEvent) => {
+            enqueueEvent({
+              type: `invoke/${eType}[${i}]` as const,
+              payload: emittedEvent,
+              [SystemEventSymbol]: true,
+            }, { path })
+          })
+        }
+        childRt.start()
+        break
+      }
       case 'function': {
         const abortController = new AbortController()
         const { signal } = abortController
-        rtOutbound.children = {
-          ...rtOutbound.children,
-          [childKey]: { stop: () => abortController.abort() },
+        setChild({ stop: () => abortController.abort() })
+        const emit = (emittedEvent: EmittedEvent) => {
+          if (
+            !(emittedEvent && typeof emittedEvent === 'object' && emittedETypesToListen.includes(emittedEvent?.type))
+          ) {
+            throw new Error(`Invalid emittedEvent: ${JSON.stringify(emittedEvent)}`)
+          }
+          enqueueEvent({ type: `invoke/${emittedEvent?.type}[${i}]` as const, payload: emittedEvent, [SystemEventSymbol]: true }, { path })
         }
-        Promise.resolve()
-          .then(() => srcValue(inputValue, { signal }))
-          .then((output) => {
+        const result = (() => {
+          try {
+            return (srcValue as ServiceFn)(inputValue, { signal, emit })
+          } catch (error) {
             if (!signal.aborted) {
-              enqueueEvent({ type: `invoke/done[${i}]`, output }, { path })
+              enqueueEvent({ type: `invoke/:error:[${i}]` as const, payload: { type: ':error:', error }, [SystemEventSymbol]: true }, { path })
             }
-          })
+          }
+        })()
+        if (!(result instanceof Promise)) {
+          o_handleInvokedFnResult(result, path, i, abortController, rtOutbound, setChild)
+          return
+        }
+        result.then((output) => o_handleInvokedFnResult(output, path, i, abortController, rtOutbound, setChild))
           .catch((error) => {
             if (!signal.aborted) {
-              enqueueEvent({ type: `invoke/error[${i}]`, error }, { path })
+              enqueueEvent({ type: `invoke/:error:[${i}]` as const, payload: { type: ':error:', error }, [SystemEventSymbol]: true }, { path })
             }
           })
-        break
-      }
-      case 'machine': {
-        const childRt = createRuntime(srcValue, { id: childKey, input: () => inputValue })
-        rtOutbound.children = { ...rtOutbound.children, [childKey]: childRt }
-        childRt.subscribe(({ runtimeStatus, output }) => {
-          if (runtimeStatus === 'done') {
-            enqueueEvent({ type: `invoke/done[${i}]`, output }, { path })
-          }
-        })
-        childRt.start()
         break
       }
     }
@@ -873,7 +943,6 @@ function o_readyToFindAlwaysTransition<C extends MContext, Ex extends EventBody,
 
 export function evalAlwaysEvent<C extends MContext, Ex extends EventBody, I>(
   fnBaseParam: FnBaseParams<C, Ex, I>[0],
-  //crrStateTree: RecursiveRecord,
   crrStates: StateRoute,
   machineGuards: Machine<any, any, any, any, any, any, any, any, any>['internal']['guards'],
   stateCatalog: Map<string, NormalizedStateItemBoth>,

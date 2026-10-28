@@ -90,7 +90,6 @@ describe('rt_main/parallel', () => {
         finished: [entryHook(log('finished:entry')), exitHook(log('finished:exit')), on('reset', { to: 'idle' })],
       }),
     )
-    //console.log(`DBG:100: `, machine.definition.stateOf.working.sub?.stateOf)
 
     /** 直前の確認以降に増えた trace だけを取り出す */
     const makeTracer = (runtime: Runtime<any>) => {

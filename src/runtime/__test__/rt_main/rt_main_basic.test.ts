@@ -239,6 +239,7 @@ describe('rt_main/basic', () => {
   describe('guard と actins の確認', () => {
     const loginMachine = createMachine(
       {
+        name: 'login',
         types: {
           events: {} as { type: 'LOGIN_FAILED' } | { type: 'LOGIN_SUCCESS' } | { type: 'UNLOCK' },
         },
@@ -314,6 +315,7 @@ describe('rt_main/basic', () => {
 
       const mockCalls = observer.mock.calls!
       expect(mockCalls[0]![0]).toEqual({
+        runtimeId: expect.stringMatching(/^login:\d+$/),
         states: ['/idle'],
         stateValue: '/idle',
         context: { failedAttempts: 0 },
@@ -323,6 +325,7 @@ describe('rt_main/basic', () => {
         _children: {},
       })
       expect(mockCalls[0]![1]).toEqual({
+        runtimeId: expect.stringMatching(/^login:\d+$/),
         states: [],
         stateValue: undefined,
         context: { failedAttempts: 0 },
@@ -333,6 +336,7 @@ describe('rt_main/basic', () => {
       })
 
       expect(mockCalls[1]![0]).toEqual({
+        runtimeId: expect.stringMatching(/^login:\d+$/),
         states: ['/idle'],
         stateValue: '/idle',
         context: { failedAttempts: 1 },
@@ -346,6 +350,7 @@ describe('rt_main/basic', () => {
       expect(mockCalls[1]![0].context).not.toBe(mockCalls[1]![1].context)
 
       expect(mockCalls[2]![0]).toEqual({
+        runtimeId: expect.stringMatching(/^login:\d+$/),
         states: ['/idle'],
         stateValue: '/idle',
         context: { failedAttempts: 2 },
@@ -358,6 +363,7 @@ describe('rt_main/basic', () => {
       expect(mockCalls[2]![0].context).not.toBe(mockCalls[2]![1].context)
 
       expect(mockCalls[3]![0]).toEqual({
+        runtimeId: expect.stringMatching(/^login:\d+$/),
         states: ['/locked'],
         stateValue: '/locked',
         context: { failedAttempts: 3 },

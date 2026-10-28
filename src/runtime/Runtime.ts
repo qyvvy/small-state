@@ -1,23 +1,25 @@
 import type {
+  BuiltinEventBody,
   InternalEPayload,
-  InternalEventBody,
   Machine,
   MContext,
   PureETypeString,
   ServiceRecord,
+  SystemEventBody,
 } from '../machine/m.types'
 import { ST_DELIM } from '../shared/constants'
 import type { Expand } from '../shared/general.types'
 import { defineFixedProperty } from '../shared/utils'
 import { MailBox } from './MailBox'
-import type { Children, InferredMachineTypes, InputFromMachine, RuntimeOutbound, StateRoute } from './r.types'
+import type { Children, InferMInput, InferredMachineTypes, RuntimeOutbound, StateRoute } from './r.types'
 import { initRuntime, macrostep } from './runtime_step'
 import { readyAction } from './runtime_step.core'
 import { runtimeUtils } from './runtime_utils'
 
 export type RuntimeStatus = 'stopped' | 'active' | 'done' | 'error'
 
-type Snapshot<C extends MContext, O, S extends ServiceRecord> = {
+export type Snapshot<C extends MContext, O, S extends ServiceRecord> = {
+  runtimeId: string
   states: string[]
   stateValue: string | string[] | undefined
   context: Expand<X_RemovePrivateKeys<C>>
@@ -43,7 +45,7 @@ type X_RemovePrivateKeys<T extends Record<string, unknown>> = {
 
 export function createRuntime<M extends Machine<any, any, any, any, any, any, any, any, any>>(
   machine: M,
-  option?: RuntimeOptions<InputFromMachine<M>>,
+  option?: RuntimeOptions<InferMInput<M>>,
 ) {
   const runtime = new Runtime(machine, option)
   return runtime
@@ -58,6 +60,9 @@ type G<Mt extends InferredMachineTypes<any>> = Mt['G']
 type A<Mt extends InferredMachineTypes<any>> = Mt['A']
 type S<Mt extends InferredMachineTypes<any>> = Mt['S']
 
+const STOP_EVENT = { type: 'system/stop' }
+
+let idCounter = 0
 export class Runtime<
   M extends Machine<any, any, any, any, any, any, any, any, any>,
   Mt extends InferredMachineTypes<M> = InferredMachineTypes<M>,
@@ -68,9 +73,10 @@ export class Runtime<
   readonly #input!: I<Mt>
   #realContext!: C<Mt>
   #crrStates: StateRoute = []
-  #sentQueue: MailBox<E<Mt> | InternalEventBody, InternalEPayload> = new MailBox(this.#processSentEvent.bind(this))
+  #sentQueue: MailBox<E<Mt> | BuiltinEventBody, InternalEPayload> = new MailBox(this.#processSentEvent.bind(this))
   #enqueueEvent = this.#sentQueue.enqueue.bind(this.#sentQueue)
   #outbound: RuntimeOutbound<E<Mt>, EM<Mt>, S<Mt>> = {
+    id: '',
     enqueueEvent: this.#enqueueEvent,
     emit: this.#_emit.bind(this),
     children: {},
@@ -97,28 +103,29 @@ export class Runtime<
   }
 
   constructor(machine: M, { id, input }: RuntimeOptions<I<Mt>> = {}) {
-    defineFixedProperty(this, 'id', id || `${machine.name}-${String(Date.now() % 10_000_000_000).padStart(10, '0')}`, {
+    defineFixedProperty(this, 'id', id || `${machine.name}:${idCounter++}`, {
       enumerable: true,
     })
     defineFixedProperty(this, 'machine', machine, { enumerable: true })
     this.#machineInternal = machine.internal
     this.#input = input?.() as I<Mt>
+    this.#outbound.id = this.id
 
     const { initContext } = machine.internal
-    const context = initContext ? initContext(this.#input) : (undefined as any as C<Mt>)
+    const context = initContext ? initContext(this.#input) : (null as any as C<Mt>)
     this.#buildAndSetSnapshot(context, true, 'stopped')()
   }
 
   subscribe(observer: Observer<C<Mt>, O<Mt>, S<Mt>>) {
     this.#observers.add(observer)
-    return () => this.#observers.delete(observer)
+    return () => {
+      this.#observers.delete(observer)
+    }
   }
 
   start() {
     if (this.#isStarted) return this
     this.#isStarted = true
-    this.#sentQueue.start()
-    const INIT_EVENT = { type: ':init:' } as E<Mt>
 
     const { context, hasTransitioned } = initRuntime(
       this.#realContext,
@@ -128,13 +135,17 @@ export class Runtime<
       this.#outbound,
     )
 
-    this.#buildAndSetSnapshot(context, hasTransitioned, 'active')(INIT_EVENT)
+    this.#buildAndSetSnapshot(context, hasTransitioned, 'active')({ type: ':init:' } as E<Mt>)
+    this.#sentQueue.start()
     return this
   }
 
   send(event: E<Mt> | PureETypeString<E<Mt>>) {
-    if (this.#snapshot.runtimeStatus !== 'active') return this
     const eventObj = (typeof event === 'string' ? { type: event } : event) as E<Mt>
+    if (this.#snapshot.runtimeStatus !== 'active') {
+      console.warn(`Event "${eventObj.type}" was sent to non-active runtime: ${this.id}`)
+      return this
+    }
     this.#enqueueEvent(eventObj)
     return this
   }
@@ -143,23 +154,11 @@ export class Runtime<
     if (this.#snapshot.runtimeStatus !== 'active') return this
 
     this.#sentQueue.clear()
-    // TODO: 終了処理を mailbox を介して行う
-    {
-      const children = { ...this.#outbound.children }
-      for (const id in children) {
-        children[id]!.stop()
-        delete children[id]
-      }
-      this.#outbound.children = children
-    }
-    this.#buildAndSetSnapshot(this.#realContext, false, 'stopped')()
-    this.#observers.clear()
-    this.#emittedListeners.clear()
-
+    this.#enqueueEvent(STOP_EVENT, {})
     return this
   }
 
-  on(emittedEventType: EM<Mt>['type'], handler: (emittedEvent: EM<Mt>) => void) {
+  onEmitted(emittedEventType: EM<Mt>['type'], handler: (emittedEvent: EM<Mt>) => void) {
     let listeners = this.#emittedListeners.get(emittedEventType)
     if (!listeners) {
       listeners = new Set()
@@ -174,9 +173,12 @@ export class Runtime<
     }
   }
 
-  #processSentEvent<Ex extends E<Mt> | InternalEventBody>(event: Ex, internalEPayload?: InternalEPayload) {
+  #processSentEvent<Ex extends E<Mt> | BuiltinEventBody | SystemEventBody>(event: Ex, internalEPayload?: InternalEPayload) {
+    if (event === STOP_EVENT) {
+      return this.#stop()
+    }
     const { guards, actions } = this.#machineInternal
-    const actionRunner = readyAction<C<Mt>, E<Mt>, I<Mt>, EM<Mt>, G<Mt>, A<Mt>, Ex>(
+    const actionRunner = readyAction<C<Mt>, E<Mt>, I<Mt>, EM<Mt>, G<Mt>, A<Mt>, S<Mt>, Ex>(
       this.#realContext,
       event,
       this.#input,
@@ -199,6 +201,20 @@ export class Runtime<
 
       this.#buildAndSetSnapshot(context, hasTransitioned)(event as E<Mt>)
     }
+  }
+
+  #stop() {
+    {
+      const children = { ...this.#outbound.children }
+      for (const id in children) {
+        children[id]!.stop()
+        delete children[id]
+      }
+      this.#outbound.children = children
+    }
+    this.#buildAndSetSnapshot(this.#realContext, false, 'stopped')()
+    this.#observers.clear()
+    this.#emittedListeners.clear()
   }
 
   #_emit(emittedEvent: EM<Mt>) {
@@ -228,15 +244,17 @@ export class Runtime<
     const contextUpdated = newRealContext !== this.#realContext
     if (contextUpdated) {
       this.#realContext = newRealContext
-      context = Object.entries(newRealContext).reduce(
-        (acc, [k, v]) => {
-          if (!k.startsWith('_')) {
-            acc[k as keyof X_RemovePrivateKeys<C<Mt>>] = v
-          }
-          return acc
-        },
-        {} as X_RemovePrivateKeys<C<Mt>>,
-      )
+      context = !newRealContext
+        ? newRealContext
+        : Object.entries(newRealContext).reduce(
+          (acc, [k, v]) => {
+            if (!k.startsWith('_')) {
+              acc[k as keyof X_RemovePrivateKeys<C<Mt>>] = v
+            }
+            return acc
+          },
+          {} as X_RemovePrivateKeys<C<Mt>>,
+        )
     }
 
     return (event: E<Mt> = {} as E<Mt>) => {
@@ -247,6 +265,7 @@ export class Runtime<
       const isCompleted = !states.length ? false : states.every((stPath) => stateCatalog.get(stPath)?.def.final)
 
       this.#snapshot = {
+        runtimeId: this.id,
         states,
         get stateValue() {
           return states.length <= 1 ? states[0] : states

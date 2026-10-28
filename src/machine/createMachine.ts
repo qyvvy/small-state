@@ -1,6 +1,15 @@
 import { type as arkType } from 'arktype'
 import { ST_DELIM } from '../shared/constants'
-import type { AnyFn, Expand, Merge, OneOrMany, Placeholder, Values } from '../shared/general.types'
+import type {
+  AnyFn,
+  Expand,
+  IsAny,
+  IsEqual,
+  Merge,
+  OneOrMany,
+  Placeholder,
+  Values,
+} from '../shared/general.types'
 import { assertOrThrow, deepFreeze, ensureArray, parentPathOf } from '../shared/utils'
 import * as ark_m_config from './arktype/ark_m_config'
 import type * as ark_normalized from './arktype/ark_normalized'
@@ -8,14 +17,14 @@ import * as ark_stdef from './arktype/ark_stdef'
 import type {
   ActionFnParams,
   BuiltinEType,
-  ChildDoneEType,
-  ChildDoneEventBody,
+  BuiltinEventBody,
+  ChildDoneEBody,
   EmittedEvent,
   EventBody,
   FnBaseParams,
-  FnServiceOptions,
   InternalEPayload,
-  InternalEventBody,
+  IvkDoneEBody,
+  IvkErrorEBody,
   LimitedActionFnParams,
   Machine,
   MachineConfig,
@@ -27,6 +36,8 @@ import type {
   NStateItemDef,
   ParallelNormalizedDefinition,
   ParamsInput,
+  ServiceFn,
+  ServiceFnOptions,
   ServiceRecord,
   StateName,
   TopLvStDefItem,
@@ -153,8 +164,8 @@ function exitHook<
   return [ExitSymbol, (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A, S>, null, actions] as const // StDefItems
 }
 
-type O_ExtractEvent<E extends EventBody, Et extends E['type']> = Et extends ChildDoneEType
-  ? Expand<ChildDoneEventBody>
+type O_ExtractEvent<E extends EventBody, Et extends E['type']> = Et extends ChildDoneEBody['type']
+  ? Expand<ChildDoneEBody>
   : Et extends BuiltinEType
   ? E
   : E extends { type: Et }
@@ -263,19 +274,8 @@ function parallel<
   ] as const // StateDefinition
 }
 
-type OO_Target<Src, S extends ServiceRecord> = Src extends keyof S ? S[Src] : Src
-
-type O_InferIvkOutput<Src, S extends ServiceRecord> =
-  OO_Target<Src, S> extends infer T
-  ? T extends Machine<any, any, any, any, any, any, any, any, any>
-  ? ReturnType<Exclude<T['internal']['output'], undefined>>
-  : T extends AnyFn
-  ? Awaited<ReturnType<T>>
-  : never
-  : never
-
 type InvokeSrcExpr<TInput> =
-  | ((input: TInput, option: FnServiceOptions) => unknown)
+  | ServiceFn<ServiceFnOptions<EmittedEvent>, TInput>
   | Machine<any, any, TInput, any, any, any, any, any, any>
 
 type InvokeConfig<
@@ -292,18 +292,60 @@ type InvokeConfig<
   ) => Src extends keyof S ? (S[Src] extends AnyFn ? Parameters<S[Src]>[0] : SrcInput) : SrcInput
 }
 
-type InvocationCleanupEvents<
+type InvocationEvents<
   C extends MContext,
   I,
   EM extends EmittedEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends ServiceRecord,
-  O,
+  TSrcTypes extends { IsFn: boolean; EM: EmittedEvent; O: unknown },
 > = Array<
-  | readonly ['done', NoInfer<X_DefTypeRefluxer<C, { type: 'done'; output: O }, I, EM, G, A, S, never>>, X_HiddenImpl] // on
-  | readonly ['error', X_DefTypeRefluxer<C, { type: 'error'; error: Error }, I, EM, G, A, S, never>, X_HiddenImpl] // on
+  | readonly [
+    IvkDoneEBody<any>['type'],
+    NoInfer<X_DefTypeRefluxer<C, Expand<IvkDoneEBody<TSrcTypes['O']>>, I, EM, G, A, S, never>>,
+    X_HiddenImpl,
+  ] // on
+  | readonly [
+    IvkErrorEBody['type'],
+    X_DefTypeRefluxer<C, IvkErrorEBody, I, EM, G, A, S, never>,
+    X_HiddenImpl,
+  ] // on
+
+  // マシン対象時、EM が any であっても builtin を補完に表示させる
+  // :done: と EmittedEvent を混ぜさせない
+  | (TSrcTypes['IsFn'] extends false
+    ? IsAny<TSrcTypes['EM']> extends false
+    ? IsEqual<TSrcTypes['EM'], EmittedEvent> extends false
+    ? readonly [
+      TSrcTypes['EM']['type'],
+      X_DefTypeRefluxer<C, TSrcTypes['EM'], I, EM, G, A, S, never>,
+      X_HiddenImpl,
+    ]
+    : never
+    : never
+    : never) // on
+
+  // NOTE: 現状、invoke に関数リテラルを直接記述時に EmittedEvent を any や ServiceFnOptions で手軽に定義することはできない
+  | (TSrcTypes['IsFn'] extends true
+    ? IsAny<TSrcTypes['EM']> extends true
+    ? readonly [string, X_DefTypeRefluxer<C, EmittedEvent, I, EM, G, A, S, never>, X_HiddenImpl]
+    : readonly [TSrcTypes['EM']['type'], X_DefTypeRefluxer<C, TSrcTypes['EM'], I, EM, G, A, S, never>, X_HiddenImpl]
+    : never) // on
 >
+
+type OO_ResolveSrc<Src, S extends ServiceRecord> = Src extends keyof S ? S[Src] : Src
+
+type O_InferIvkSrcTypes<Src, S extends ServiceRecord> =
+  OO_ResolveSrc<Src, S> extends infer T
+  ? T extends Machine<any, any, any, infer EM, infer O, any, any, any, any>
+  ? { EM: EM; O: O; IsFn: false }
+  : T extends ServiceFn
+  ? Parameters<T>[1] extends ServiceFnOptions<infer EM>
+  ? { EM: NonNullable<EM>; O: Awaited<ReturnType<T>>; IsFn: true }
+  : { EM: never; O: Awaited<ReturnType<T>>; IsFn: true }
+  : never
+  : never
 
 // Overloads:
 function invoke<
@@ -318,15 +360,14 @@ function invoke<
   SrcInput = never,
 >(
   service: Src,
-  config: InvokeConfig<C, E, I, S, Src, SrcInput>,
-  ...cleanupEvents: InvocationCleanupEvents<C, I, EM, G, A, S, O_InferIvkOutput<Src, S>>
+  ...events: InvocationEvents<C, I, EM, G, A, S, O_InferIvkSrcTypes<Src, S>>
 ): readonly [
   typeof InvokeSymbol,
   X_DefTypeRefluxer<C, E, I, EM, G, A, S, BuiltinEType, unknown>,
   null,
-  any,
-  any,
-  InvocationCleanupEvents<C, I, EM, G, A, S, O_InferIvkOutput<Src, S>>,
+  X_HiddenImpl,
+  X_HiddenImpl,
+  InvocationEvents<C, I, EM, G, A, S, O_InferIvkSrcTypes<Src, S>>,
 ]
 
 function invoke<
@@ -337,17 +378,19 @@ function invoke<
   const G extends Record<string, Placeholder>,
   const A extends Record<string, Placeholder>,
   S extends ServiceRecord,
-  Src extends keyof S | InvokeSrcExpr<any>,
+  Src extends keyof S | InvokeSrcExpr<[SrcInput] extends [never] ? any : SrcInput>,
+  SrcInput = never,
 >(
   service: Src,
-  ...cleanupEvents: InvocationCleanupEvents<C, I, EM, G, A, S, O_InferIvkOutput<Src, S>>
+  config: InvokeConfig<C, E, I, S, Src, SrcInput>,
+  ...events: InvocationEvents<C, I, EM, G, A, S, O_InferIvkSrcTypes<Src, S>>
 ): readonly [
   typeof InvokeSymbol,
   X_DefTypeRefluxer<C, E, I, EM, G, A, S, BuiltinEType, unknown>,
   null,
-  any,
-  any,
-  InvocationCleanupEvents<C, I, EM, G, A, S, O_InferIvkOutput<Src, S>>,
+  X_HiddenImpl,
+  X_HiddenImpl,
+  InvocationEvents<C, I, EM, G, A, S, O_InferIvkSrcTypes<Src, S>>,
 ]
 
 // Implementation:
@@ -366,23 +409,23 @@ function invoke<
   ...args:
     | [
       config: InvokeConfig<C, E, I, S, Src, SrcInput>,
-      ...cleanupEvents: InvocationCleanupEvents<C, I, EM, G, A, S, O_InferIvkOutput<Src, S>>,
+      ...events: InvocationEvents<C, I, EM, G, A, S, O_InferIvkSrcTypes<Src, S>>,
     ]
-    | InvocationCleanupEvents<C, I, EM, G, A, S, O_InferIvkOutput<Src, S>>
+    | InvocationEvents<C, I, EM, G, A, S, O_InferIvkSrcTypes<Src, S>>
 ) {
   const [config, cleanupEvents] = ((): [
     InvokeConfig<C, E, I, S, Src, SrcInput>,
-    InvocationCleanupEvents<C, I, EM, G, A, S, O_InferIvkOutput<Src, S>>,
+    InvocationEvents<C, I, EM, G, A, S, O_InferIvkSrcTypes<Src, S>>,
   ] => {
     if (!args.length) return [{}, []]
     if (Array.isArray(args[0])) return [{}, args as any]
     const [first, ...rest] = args
-    return [first, rest as any]
+    return [first as any, rest as any]
   })()
 
   return [
     InvokeSymbol,
-    (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A, S, BuiltinEType>,
+    (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A, S>,
     null,
     service as X_HiddenImpl,
     config as X_HiddenImpl,
@@ -481,23 +524,28 @@ function x_parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateN
               }
             })()
             const { invocations, internalEvents } = def
-            invocations.push({ ...item[4], src, mainKey: '' })
+            const emittedETypesToListen: string[] = []
+            invocations.push({ ...item[4], src, emittedETypesToListen, mainKey: '' })
 
-            for (const [j, [ivkEType, _, cleanupTransitions]] of item[5].entries()) {
-              if (!(ivkEType === 'done' || ivkEType === 'error')) {
-                throw new Error(
-                  `createMachine: Invocation event must be 'done' or 'error': ${ivkEType}, at state:"${stateName}"[${i}] > invoke events[${j}]`,
-                )
-              }
-              const interm = ensureArray(cleanupTransitions!)
-              if (!interm.length || interm.some((t) => !Object.keys(t).length)) {
+            for (const [j, [ivkEType, _, ivkTransitions]] of item[5].entries()) {
+              const transitions = ensureArray(ivkTransitions!)
+              if (!transitions.length || transitions.some((t) => !Object.keys(t).length)) {
                 throw new Error(
                   `createMachine: on(eventType, config): The 'config' argument is required, at state:"${stateName}"[${i}] > invoke events[${j}] event:"${ivkEType}"`,
                 )
               }
-              internalEvents[`invoke/${ivkEType}[${invocations.length - 1}]`] = {
+              const eType: `invoke/${string}[${number}]` = `invoke/${ivkEType}[${invocations.length - 1}]`
+              if (Object.hasOwn(internalEvents, eType)) {
+                throw new Error(
+                  `createMachine: Duplicate event definition for event "${ivkEType}", at state:"${stateName}"[${i}] > invoke events[${j}]`,
+                )
+              }
+              internalEvents[eType] = {
                 cond: ({ path }: InternalEPayload) => path === _getPath(),
-                transitions: o_normalizeTransitions(interm),
+                transitions: o_normalizeTransitions(transitions),
+              }
+              if (!(ivkEType === ':done:' || ivkEType === ':error:')) {
+                emittedETypesToListen.push(ivkEType)
               }
             }
             break
@@ -788,7 +836,7 @@ function getDefinitionAndCatalog<
       throw new Error(`createMachine: Invalid state definition: Expected an object but got ${dType}.`)
     }
     if (Object.keys(stateDefDict).length === 0) {
-      throw new Error(`createMachine: Invalid state definition: The state definition object cannot be empty.`)
+      throw new Error(`createMachine: No states in machine definition.`)
     }
   }
 
@@ -828,6 +876,14 @@ function getDefinitionAndCatalog<
     stateCatalog,
     regionPaths, // マシン内では使わなくなった
   }
+}
+
+export function defServiceFn<
+  fEM extends EmittedEvent = any,
+  TInput = any,
+  fOp extends ServiceFnOptions<any> = ServiceFnOptions<fEM>,
+>(fn: (input: TInput, option: fOp) => unknown | AnyFn): ServiceFn<fOp, TInput> {
+  return fn
 }
 
 export function createMachine<
@@ -887,9 +943,9 @@ function provide<
 >(
   this: Machine<C, E, I, EM, any, G, A, S, ND>,
   implementations: {
-    guards?: { [K in keyof nG]: (arg: FnBaseParams<C, E | InternalEventBody, I>[0], params: nG[K]) => boolean }
+    guards?: { [K in keyof nG]: (arg: FnBaseParams<C, E | BuiltinEventBody, I>[0], params: nG[K]) => boolean }
     actions?: {
-      [K in keyof nA]: (arg: LimitedActionFnParams<C, E | InternalEventBody, I, EM>[0], params: nA[K]) => unknown
+      [K in keyof nA]: (arg: LimitedActionFnParams<C, E | BuiltinEventBody, I, EM>[0], params: nA[K]) => unknown
     }
     services?: nS
   },
