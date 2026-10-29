@@ -16,7 +16,7 @@ import { initRuntime, macrostep } from './runtime_step'
 import { readyAction } from './runtime_step.core'
 import { runtimeUtils } from './runtime_utils'
 
-export type RuntimeStatus = 'stopped' | 'active' | 'done' | 'error'
+export type RuntimeStatus = 'notStarted' | 'active' | 'stopped' | 'done' | 'error'
 
 export type Snapshot<C extends MContext, O, S extends ServiceRecord> = {
   runtimeId: string
@@ -113,7 +113,7 @@ export class Runtime<
 
     const { initContext } = machine.internal
     const context = initContext ? initContext(this.#input) : (null as any as C<Mt>)
-    this.#buildAndSetSnapshot(context, true, 'stopped')()
+    this.#buildAndSetSnapshot(context, true, 'notStarted')()
   }
 
   subscribe(observer: Observer<C<Mt>, O<Mt>, S<Mt>>) {

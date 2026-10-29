@@ -186,10 +186,10 @@ describe('rt_main/basic', () => {
 
     test('0:start 前に send しても何も起こらない', async () => {
       const rt = createRuntime(machine)
-      expect(rt.runtimeStatus).toBe('stopped')
+      expect(rt.runtimeStatus).toBe('notStarted')
       expect(rt.stateValue).toBeUndefined()
       rt.send({ type: 'inc' })
-      expect(rt.runtimeStatus).toBe('stopped')
+      expect(rt.runtimeStatus).toBe('notStarted')
       expect(rt.context.count).toBe(0)
       expect(rt.stateValue).toBeUndefined()
     })
@@ -330,7 +330,7 @@ describe('rt_main/basic', () => {
         stateValue: undefined,
         context: { failedAttempts: 0 },
         c: { failedAttempts: 0 },
-        runtimeStatus: 'stopped',
+        runtimeStatus: 'notStarted',
         output: undefined,
         _children: {},
       })

@@ -6,8 +6,8 @@ export async function waitFor<RT extends Runtime<any>>(
   cond: (snapshot: SnapshotFrom<RT>) => boolean,
   options?: { timeout?: number },
 ) {
-  if (runtime.runtimeStatus !== 'active') {
-    throw new Error(`RT"${runtime.id}" is not active: ${runtime.runtimeStatus}`)
+  if (runtime.runtimeStatus === 'notStarted') {
+    throw new Error(`RT"${runtime.id}" is not started.`)
   }
   return new Promise((resolve, reject) => {
     let done = false
