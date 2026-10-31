@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, jest, moc
 import { sleep } from 'bun'
 import { createMachine } from '../../../machine/createMachine'
 import { createRuntime, type Runtime } from '../../Runtime'
+import type { ServiceFn } from '../../../machine/m.types'
 
 describe('rt_main_invoke', () => {
   // 非同期処理をテスト側で任意に操作するヘルパー
@@ -148,7 +149,7 @@ describe('rt_main_invoke', () => {
   })
 
   describe('4.invoke のキャンセル', () => {
-    const build = (src: any) =>
+    const build = (src: ServiceFn) =>
       createMachine(
         {
           initContext: () => ({ user: null as any }),
@@ -171,8 +172,8 @@ describe('rt_main_invoke', () => {
     test('4.1:キャンセルされると signal が abort に', async () => {
       let signal!: AbortSignal
       const rt = createRuntime(
-        build((_: any, options: any) => {
-          signal = options.signal
+        build((_, __, sig) => {
+          signal = sig
           return new Promise(() => { })
         }),
       ).start()
@@ -188,8 +189,8 @@ describe('rt_main_invoke', () => {
       const d = deferred<string>()
       let signal!: AbortSignal
       const rt = createRuntime(
-        build((_: any, options: any) => {
-          signal = options.signal
+        build((_, __, sig) => {
+          signal = sig
           return d.promise
         }),
       ).start()

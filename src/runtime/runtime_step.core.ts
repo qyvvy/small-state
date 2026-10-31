@@ -1,4 +1,5 @@
 import type {
+  AnyMachine,
   ActionFnParams,
   BuiltinEventBody,
   CheckFn,
@@ -333,7 +334,7 @@ export function readyAction<
     return fn(fnBaseParam, typeof params !== 'function' ? params : params(fnBaseParam))
   }
 
-  function sendTo(target: string, event: InferEventBody<Machine<any, any, any, any, any, any, any, any, any>>) {
+  function sendTo(target: string, event: InferEventBody<AnyMachine>) {
     if (!Object.hasOwn(rtOutbound.children, target)) {
       throw new Error(`Cannot send event to "${target}": child not found.`)
     }
@@ -430,7 +431,7 @@ export function readyAction<
 
 function o_readyToFindInternalEventTransition<C extends MContext, Ex extends EventBody, I>(
   fnBaseParam: FnBaseParams<C, Ex, I>[0],
-  machineGuards: Machine<any, any, any, any, any, any, any, any, any>['internal']['guards'],
+  machineGuards: AnyMachine['internal']['guards'],
   internalEPayload: InternalEPayload,
 ) {
   const _evalGuard = readyToEvalGuard(fnBaseParam, machineGuards)
@@ -453,7 +454,7 @@ function o_readyToFindInternalEventTransition<C extends MContext, Ex extends Eve
 
 function o_readyToFindTransitionByEvent<C extends MContext, Ex extends EventBody, I>(
   fnBaseParam: FnBaseParams<C, Ex, I>[0],
-  machineGuards: Machine<any, any, any, any, any, any, any, any, any>['internal']['guards'],
+  machineGuards: AnyMachine['internal']['guards'],
 ) {
   const _evalGuard = readyToEvalGuard(fnBaseParam, machineGuards)
 
@@ -475,7 +476,7 @@ export function deriveEventTransition<C extends MContext, Ex extends EventBody, 
   internalEPayload: InternalEPayload | undefined,
   fnBaseParam: FnBaseParams<C, Ex, I>[0],
   crrStates: StateRoute,
-  machineGuards: Machine<any, any, any, any, any, any, any, any, any>['internal']['guards'],
+  machineGuards: AnyMachine['internal']['guards'],
   stateCatalog: Map<string, NormalizedStateItemBoth>,
   topLvDefItem: TopLvStDefItem<string>,
 ): TransitionExec[] {
@@ -751,7 +752,7 @@ export function launchInvocations<E extends EventBody, S extends ServiceRecord>(
 
     switch (srcType) {
       case 'machine': {
-        const childRt = createRuntime(srcValue as Machine<any, any, any, any, any, any, any, any, any>, {
+        const childRt = createRuntime(srcValue as AnyMachine, {
           id: `${rtOutbound.id}/${childKey}`,
           input: () => inputValue,
         })
@@ -792,7 +793,7 @@ export function launchInvocations<E extends EventBody, S extends ServiceRecord>(
         }
         const result = (() => {
           try {
-            return (srcValue as ServiceFn)(inputValue, { signal, emit })
+            return (srcValue as ServiceFn)(inputValue, emit, signal)
           } catch (error) {
             if (!signal.aborted) {
               enqueueEvent({ type: `invoke/:error:[${i}]` as const, payload: { type: ':error:', error }, [SystemEventSymbol]: true }, { path })
@@ -925,7 +926,7 @@ export function* genChildDoneEvents<C extends MContext, Ex extends EventBody, I>
 
 function o_readyToFindAlwaysTransition<C extends MContext, Ex extends EventBody, I>(
   fnBaseParam: FnBaseParams<C, Ex, I>[0],
-  machineGuards: Machine<any, any, any, any, any, any, any, any, any>['internal']['guards'],
+  machineGuards: AnyMachine['internal']['guards'],
 ) {
   const _evalGuard = readyToEvalGuard(fnBaseParam, machineGuards)
 
@@ -944,7 +945,7 @@ function o_readyToFindAlwaysTransition<C extends MContext, Ex extends EventBody,
 export function evalAlwaysEvent<C extends MContext, Ex extends EventBody, I>(
   fnBaseParam: FnBaseParams<C, Ex, I>[0],
   crrStates: StateRoute,
-  machineGuards: Machine<any, any, any, any, any, any, any, any, any>['internal']['guards'],
+  machineGuards: AnyMachine['internal']['guards'],
   stateCatalog: Map<string, NormalizedStateItemBoth>,
 ) {
   const findTransition = o_readyToFindAlwaysTransition(fnBaseParam, machineGuards)

@@ -4,7 +4,7 @@ import type {
   EventBody,
   FnBaseParams,
   LimitedActionFnParams,
-  Machine,
+  AnyMachine,
   MContext,
   NormalizedTransition,
   ParamsInput,
@@ -99,7 +99,7 @@ export const runtimeUtils = {
 
 export function readyToEvalGuard<C extends MContext, Ex extends EventBody, I>(
   fnBaseParam: FnBaseParams<C, Ex, I>[0],
-  machineGuards: Machine<any, any, any, any, any, any, any, any, any>['internal']['guards'],
+  machineGuards: AnyMachine['internal']['guards'],
 ) {
   return (guard: NormalizedTransition['guards'][number]): boolean => {
     const [fn, params] = resolveGuardElement(guard, machineGuards)

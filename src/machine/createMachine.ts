@@ -5,6 +5,7 @@ import type {
   Expand,
   IsAny,
   IsEqual,
+  IsUnknown,
   Merge,
   OneOrMany,
   Placeholder,
@@ -19,6 +20,7 @@ import type {
   BuiltinEType,
   BuiltinEventBody,
   ChildDoneEBody,
+  EmitFn,
   EmittedEvent,
   EventBody,
   FnBaseParams,
@@ -37,7 +39,6 @@ import type {
   ParallelNormalizedDefinition,
   ParamsInput,
   ServiceFn,
-  ServiceFnOptions,
   ServiceRecord,
   StateName,
   TopLvStDefItem,
@@ -275,7 +276,7 @@ function parallel<
 }
 
 type InvokeSrcExpr<TInput> =
-  | ServiceFn<ServiceFnOptions<EmittedEvent>, TInput>
+  | ServiceFn<TInput>
   | Machine<any, any, TInput, any, any, any, any, any, any>
 
 type InvokeConfig<
@@ -299,53 +300,60 @@ type InvocationEvents<
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends ServiceRecord,
-  TSrcTypes extends { IsFn: boolean; EM: EmittedEvent; O: unknown },
+  TSrcTypes extends { Type: 'm' | 'f'; EM: EmittedEvent; O: unknown },
 > = Array<
   | readonly [
-    IvkDoneEBody<any>['type'],
+    string,
     NoInfer<X_DefTypeRefluxer<C, Expand<IvkDoneEBody<TSrcTypes['O']>>, I, EM, G, A, S, never>>,
     X_HiddenImpl,
-  ] // on
+  ]
   | readonly [
-    IvkErrorEBody['type'],
+    string,
     X_DefTypeRefluxer<C, IvkErrorEBody, I, EM, G, A, S, never>,
     X_HiddenImpl,
-  ] // on
+  ]
 
   // マシン対象時、EM が any であっても builtin を補完に表示させる
   // :done: と EmittedEvent を混ぜさせない
-  | (TSrcTypes['IsFn'] extends false
-    ? IsAny<TSrcTypes['EM']> extends false
-    ? IsEqual<TSrcTypes['EM'], EmittedEvent> extends false
-    ? readonly [
-      TSrcTypes['EM']['type'],
+  | (TSrcTypes['Type'] extends 'm' ?
+    IsAny<TSrcTypes['EM']> extends false ?
+    IsEqual<TSrcTypes['EM'], EmittedEvent> extends false ?
+    readonly [
+      string,
       X_DefTypeRefluxer<C, TSrcTypes['EM'], I, EM, G, A, S, never>,
       X_HiddenImpl,
-    ]
-    : never
-    : never
-    : never) // on
+    ] :
+    never :
+    never :
+    never
+  )
 
-  // NOTE: 現状、invoke に関数リテラルを直接記述時に EmittedEvent を any や ServiceFnOptions で手軽に定義することはできない
-  | (TSrcTypes['IsFn'] extends true
-    ? IsAny<TSrcTypes['EM']> extends true
-    ? readonly [string, X_DefTypeRefluxer<C, EmittedEvent, I, EM, G, A, S, never>, X_HiddenImpl]
-    : readonly [TSrcTypes['EM']['type'], X_DefTypeRefluxer<C, TSrcTypes['EM'], I, EM, G, A, S, never>, X_HiddenImpl]
-    : never) // on
+  // NOTE: 現状、引数にEmittedEvent の型を指定する場合、 defServiceFn でラップしないと機能しない。
+  | (TSrcTypes['Type'] extends 'f' ?
+    IsEqual<TSrcTypes['EM'], EmittedEvent> extends false ?
+    readonly [string, X_DefTypeRefluxer<C, TSrcTypes['EM'], I, EM, G, A, S, never>, X_HiddenImpl] :
+    never :
+    never
+  )
 >
 
 type OO_ResolveSrc<Src, S extends ServiceRecord> = Src extends keyof S ? S[Src] : Src
 
 type O_InferIvkSrcTypes<Src, S extends ServiceRecord> =
-  OO_ResolveSrc<Src, S> extends infer T
-  ? T extends Machine<any, any, any, infer EM, infer O, any, any, any, any>
-  ? { EM: EM; O: O; IsFn: false }
-  : T extends ServiceFn
-  ? Parameters<T>[1] extends ServiceFnOptions<infer EM>
-  ? { EM: NonNullable<EM>; O: Awaited<ReturnType<T>>; IsFn: true }
-  : { EM: never; O: Awaited<ReturnType<T>>; IsFn: true }
-  : never
-  : never
+  OO_ResolveSrc<Src, S> extends infer T ?
+  T extends Machine<any, any, any, infer EM, infer O, any, any, any, any> ?
+  { EM: EM; O: O; Type: 'm' } :
+  T extends ServiceFn ?
+
+  (
+    Parameters<T>[1] extends EmitFn<infer EM> ?
+    IsUnknown<ReturnType<T>> extends false ?
+    { EM: NonNullable<EM>; O: Awaited<ReturnType<T>>; Type: 'f' } :
+    never :
+    { EM: EmittedEvent; O: Awaited<ReturnType<T>>; Type: 'f' }
+  ) :
+  never :
+  never
 
 // Overloads:
 function invoke<
@@ -413,7 +421,7 @@ function invoke<
     ]
     | InvocationEvents<C, I, EM, G, A, S, O_InferIvkSrcTypes<Src, S>>
 ) {
-  const [config, cleanupEvents] = ((): [
+  const [config, events] = ((): [
     InvokeConfig<C, E, I, S, Src, SrcInput>,
     InvocationEvents<C, I, EM, G, A, S, O_InferIvkSrcTypes<Src, S>>,
   ] => {
@@ -429,7 +437,7 @@ function invoke<
     null,
     service as X_HiddenImpl,
     config as X_HiddenImpl,
-    cleanupEvents,
+    events,
   ] as const // StateDefinition
 }
 
@@ -879,12 +887,11 @@ function getDefinitionAndCatalog<
 }
 
 export function defServiceFn<
-  fEM extends EmittedEvent = any,
-  TInput = any,
-  fOp extends ServiceFnOptions<any> = ServiceFnOptions<fEM>,
->(fn: (input: TInput, option: fOp) => unknown | AnyFn): ServiceFn<fOp, TInput> {
+  TFn extends (input: any, emit: EmitFn<EmittedEvent>, signal: AbortSignal) => unknown
+>(fn: TFn) {
   return fn
 }
+
 
 export function createMachine<
   C extends MContext,
@@ -937,7 +944,7 @@ function provide<
   const A extends Record<string, Placeholder>,
   const S extends ServiceRecord,
   ND extends NormalizedDefinition,
-  const nS extends Record<string, (input: any) => unknown>,
+  const nS extends ServiceRecord,
   const nG extends Record<string, Placeholder> = Record<string, Placeholder>,
   const nA extends Record<string, Placeholder> = Record<string, Placeholder>,
 >(

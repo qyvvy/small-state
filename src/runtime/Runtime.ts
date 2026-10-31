@@ -1,7 +1,7 @@
 import type {
+  AnyMachine,
   BuiltinEventBody,
   InternalEPayload,
-  Machine,
   MContext,
   PureETypeString,
   ServiceRecord,
@@ -43,7 +43,7 @@ type X_RemovePrivateKeys<T extends Record<string, unknown>> = {
   [K in keyof T as K extends `_${string}` ? never : K]: T[K]
 }
 
-export function createRuntime<M extends Machine<any, any, any, any, any, any, any, any, any>>(
+export function createRuntime<M extends AnyMachine>(
   machine: M,
   option?: RuntimeOptions<InferMInput<M>>,
 ) {
@@ -64,7 +64,7 @@ const STOP_EVENT = { type: 'system/stop' }
 
 let idCounter = 0
 export class Runtime<
-  M extends Machine<any, any, any, any, any, any, any, any, any>,
+  M extends AnyMachine,
   Mt extends InferredMachineTypes<M> = InferredMachineTypes<M>,
 > {
   readonly id!: string

@@ -1,4 +1,4 @@
-import type { AnyFn, EmptyRecord, Expand, IsAny, IsEqual, LowInfer, Merge, Placeholder, Values } from '../shared/general.types'
+import type { AnyFn, EmptyRecord, Expand, LowInfer, Merge, Placeholder, Values } from '../shared/general.types'
 
 
 export const EntrySymbol: unique symbol = Symbol('Entry')
@@ -30,7 +30,7 @@ export type EventBody = { type: string;[key: string]: any }
 export type EmittedEvent = { type: string;[key: string]: any }
 export type StateName = string
 
-export type InferEventBody<M extends Machine<any, any, any, any, any, any, any, any, any>> =
+export type InferEventBody<M extends AnyMachine> =
   M extends Machine<any, infer E, any, any, any, any, any, any, any> ? E : never
 
 // type 以外のプロパティを持たない EventBody の型を抽出する
@@ -99,8 +99,8 @@ export type UpdateFn<C extends MContext> = (updates: UpdateFnParam<C>) => unknow
 
 type O_ToMachineOnlyRecord<S extends ServiceRecord> = {
   [K in keyof S as
-  S[K] extends Machine<any, any, any, any, any, any, any, any, any> ? K : never
-  ]: S[K] extends Machine<any, any, any, any, any, any, any, any, any> ? S[K] : never
+  S[K] extends AnyMachine ? K : never
+  ]: S[K] extends AnyMachine ? S[K] : never
 }
 type O_RemoveAfterColon<Sk> = Sk extends `${infer T}:${string}` ? T : Sk
 export type SendToFn<
@@ -136,7 +136,7 @@ export type NormalizedTransition = {
 export type NormalizedSrc =
   | { type: 'function', value: ServiceFn }
   | { type: 'string', value: string }
-  | { type: 'machine', value: Machine<any, any, any, any, any, any, any, any, any> }
+  | { type: 'machine', value: AnyMachine }
 
 export type NormalizedInvocation = {
   mainKey: string
@@ -197,16 +197,13 @@ export type ParamsInputArgsOf<
   : [params: ParamsInput<IR[IRk], C, Ex, I>]
 
 
-
-export type ServiceFnOptions<fEM extends EmittedEvent = EmittedEvent> = { signal: AbortSignal, emit: EmitFn<fEM> }
 export type ServiceFn<
-  Op extends ServiceFnOptions<EmittedEvent> = ServiceFnOptions<EmittedEvent>, TInput = any
+  TInput = any,
+  TEmitted extends EmittedEvent = EmittedEvent,
 > =
-  ((input: TInput, option: Op) => (unknown | AnyFn))
-export type ServiceRecord = Record<string,
-  | ServiceFn
-  | Machine<any, any, any, any, any, any, any, any, any>
->
+  (input: TInput, emit: EmitFn<TEmitted>, signal: AbortSignal) => unknown
+
+export type ServiceRecord = Record<string, ServiceFn | AnyMachine>
 
 export type MachineConfig<
   C extends MContext,
@@ -232,8 +229,9 @@ export type TopLvStDefItem<Et extends string> = {
   events: { [K in Et]?: NormalizedTransition[] }
   internalEvents: { [K in InternalEType]?: InternalEvent }
 }
-export const MachineSymbol: unique symbol = Symbol('Machine')
+export type AnyMachine = Machine<any, any, any, any, any, any, any, any, any>
 
+export const MachineSymbol: unique symbol = Symbol('Machine')
 export type Machine<
   C extends MContext,
   E extends EventBody,
@@ -260,7 +258,7 @@ export type Machine<
     stateCatalog: Map<string, NormalizedStateItemBoth>
   }
   provide: <
-    const nS extends Record<string, (input: any) => unknown>,
+    const nS extends ServiceRecord,
     const nG extends Record<string, Placeholder> = Record<string, Placeholder>,
     const nA extends Record<string, Placeholder> = Record<string, Placeholder>,
   >(
