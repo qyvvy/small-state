@@ -893,7 +893,7 @@ export function defServiceFn<
 }
 
 
-export function createMachine<
+export function makeMachine<
   C extends MContext,
   const E extends EventBody,
   const I,

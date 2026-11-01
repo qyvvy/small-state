@@ -1,9 +1,9 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, jest, mock, test } from 'bun:test'
 import { sleep } from 'bun'
-import { createMachine, defServiceFn } from '../../../machine/createMachine'
 import type { EmitFn, ServiceFn } from '../../../machine/m.types'
+import { defServiceFn, makeMachine } from '../../../machine/machine'
 import { waitFor } from '../../../tools/waitFor'
-import { createRuntime } from '../../Runtime'
+import { makeRuntime } from '../../Runtime'
 
 describe('rt_main_invoke', () => {
   // 非同期処理をテスト側で任意に操作するヘルパー
@@ -20,7 +20,7 @@ describe('rt_main_invoke', () => {
 
   test('1:resolve するまで遷移しない。resolveすると遷移し結果がoutputに渡される', async () => {
     const d = deferred<{ id: string }>()
-    const machine = createMachine(
+    const machine = makeMachine(
       {
         initContext: () => ({ user: null as null | { id: string } }),
       },
@@ -36,7 +36,7 @@ describe('rt_main_invoke', () => {
         failure: null,
       }),
     )
-    const rt = createRuntime(machine).start()
+    const rt = makeRuntime(machine).start()
     expect(rt.stateValue).toBe('/loading')
 
     d.resolve({ id: 'u1' })
@@ -48,7 +48,7 @@ describe('rt_main_invoke', () => {
 
   test('2.1:同期的なreject', async () => {
     const err = new Error()
-    const machine = createMachine(
+    const machine = makeMachine(
       {
         initContext: () => ({ error: null as unknown }),
       },
@@ -66,7 +66,7 @@ describe('rt_main_invoke', () => {
         failure: null,
       }),
     )
-    const rt = createRuntime(machine).start()
+    const rt = makeRuntime(machine).start()
     await flush()
 
     expect(rt.stateValue).toBe('/failure')
@@ -75,7 +75,7 @@ describe('rt_main_invoke', () => {
 
   test('2.2:非同期的なreject', async () => {
     const err = new Error()
-    const machine = createMachine(
+    const machine = makeMachine(
       {
         initContext: () => ({ error: null as unknown }),
       },
@@ -93,7 +93,7 @@ describe('rt_main_invoke', () => {
         failure: null,
       }),
     )
-    const rt = createRuntime(machine).start()
+    const rt = makeRuntime(machine).start()
     await flush()
 
     expect(rt.stateValue).toBe('/failure')
@@ -101,7 +101,7 @@ describe('rt_main_invoke', () => {
   })
 
   test.todo('0:onError が未定義のときでも subscribe で捕捉できる', async () => {
-    const machine = createMachine(
+    const machine = makeMachine(
       {
         initContext: () => ({ error: null as unknown }),
       },
@@ -118,7 +118,7 @@ describe('rt_main_invoke', () => {
         failure: null,
       }),
     )
-    const rt = createRuntime(machine)
+    const rt = makeRuntime(machine)
     // TODO: subscribe で error を捕捉できるようにする
     const errSpy = jest.fn((x) => {
       console.log(`DBG:100: `, x)
@@ -131,7 +131,7 @@ describe('rt_main_invoke', () => {
 
   test('3:input の src への受け渡し', async () => {
     const src = jest.fn(async (_: { query: string }) => 'ok')
-    const machine = createMachine(
+    const machine = makeMachine(
       {
         initContext: () => ({ q: 'initial' }),
       },
@@ -140,7 +140,7 @@ describe('rt_main_invoke', () => {
         searching: [invoke(src, { input: ({ c }) => ({ query: c.q }) })],
       }),
     )
-    const rt = createRuntime(machine).start()
+    const rt = makeRuntime(machine).start()
     rt.send({ type: 'search' })
     await flush()
 
@@ -151,7 +151,7 @@ describe('rt_main_invoke', () => {
 
   describe('4.invoke のキャンセル', () => {
     const build = (src: ServiceFn) =>
-      createMachine(
+      makeMachine(
         {
           initContext: () => ({ user: null as any }),
         },
@@ -172,7 +172,7 @@ describe('rt_main_invoke', () => {
 
     test('4.1:キャンセルされると signal が abort に', async () => {
       let signal!: AbortSignal
-      const rt = createRuntime(
+      const rt = makeRuntime(
         build((_, __, sig) => {
           signal = sig
           return new Promise(() => { })
@@ -189,7 +189,7 @@ describe('rt_main_invoke', () => {
     test('4.1:親Runtime を stop すると signal が abort される', async () => {
       const d = deferred<string>()
       let signal!: AbortSignal
-      const rt = createRuntime(
+      const rt = makeRuntime(
         build((_, __, sig) => {
           signal = sig
           return d.promise
@@ -210,7 +210,7 @@ describe('rt_main_invoke', () => {
 
     test('4.2.1:キャンセルされたら invoke による遷移も update も起こらない', async () => {
       const d = deferred<string>()
-      const rt = createRuntime(build(() => d.promise)).start()
+      const rt = makeRuntime(build(() => d.promise)).start()
       rt.send({ type: 'cancel' })
       d.resolve('late')
       await flush()
@@ -223,7 +223,7 @@ describe('rt_main_invoke', () => {
       const unhandled = jest.fn()
       process.on('unhandledRejection', unhandled) // 捕捉されなかった reject イベントを監視する(nodeや bun の機能)
 
-      const rt = createRuntime(build(() => d.promise)).start()
+      const rt = makeRuntime(build(() => d.promise)).start()
       rt.send({ type: 'cancel' })
       d.reject(new Error('late'))
       await flush()
@@ -244,7 +244,7 @@ describe('rt_main_invoke', () => {
       }
     })
 
-    const clockMachine = createMachine(
+    const clockMachine = makeMachine(
       {
         types: { events: {} as { type: 'pause' } | { type: 'resume' } },
         initContext: () => ({ ticks: 0 }),
@@ -260,7 +260,7 @@ describe('rt_main_invoke', () => {
     )
 
     test('1:paused では child が存在しなくなりタイマーの数も0に', async () => {
-      const rt = createRuntime(clockMachine).start()
+      const rt = makeRuntime(clockMachine).start()
       //await Promise.resolve()
       expect(jest.getTimerCount()).toBe(1)
 
@@ -271,7 +271,7 @@ describe('rt_main_invoke', () => {
     })
 
     test('2:子の emit が親に届く', async () => {
-      const rt = createRuntime(clockMachine).start()
+      const rt = makeRuntime(clockMachine).start()
       //await Promise.resolve()
 
       jest.advanceTimersByTime(999)
@@ -283,7 +283,7 @@ describe('rt_main_invoke', () => {
     })
 
     test('3:pauseでタイマーが破棄され、以後時間経過で ticker は増えない', async () => {
-      const rt = createRuntime(clockMachine).start()
+      const rt = makeRuntime(clockMachine).start()
       //await Promise.resolve()
       jest.advanceTimersByTime(2000)
       expect(rt.context.ticks).toBe(2)
@@ -295,7 +295,7 @@ describe('rt_main_invoke', () => {
     })
 
     test('4:再開すると新しいticker が起動する', async () => {
-      const rt = createRuntime(clockMachine).start()
+      const rt = makeRuntime(clockMachine).start()
       //await Promise.resolve()
       const first = rt.getSnapshot()._children.ticker!
       jest.advanceTimersByTime(1000)
@@ -313,7 +313,7 @@ describe('rt_main_invoke', () => {
     })
 
     test('5:pause/resumeを繰り返してもタイマーは1つのまま(リーク防止)', async () => {
-      const rt = createRuntime(clockMachine).start()
+      const rt = makeRuntime(clockMachine).start()
       for (let i = 0; i < 5; i++) {
         rt.send('pause')
         rt.send('resume')
@@ -328,11 +328,13 @@ describe('rt_main_invoke', () => {
           fire = () => emit({ type: 'tick' })
         })
 
-        const rt = createRuntime(clockMachine.provide({
-          services: {
-            ticker: mockTicker,
-          }
-        })).start()
+        const rt = makeRuntime(
+          clockMachine.provide({
+            services: {
+              ticker: mockTicker,
+            },
+          }),
+        ).start()
         fire()
         fire()
         expect(rt.context.ticks).toBe(2)
@@ -342,7 +344,7 @@ describe('rt_main_invoke', () => {
         const cleanup = jest.fn()
         const mockTicker = defServiceFn((_, emit: EmitFn<{ type: 'tick' }>) => cleanup)
 
-        const rt = createRuntime(clockMachine.provide({ services: { ticker: mockTicker } })).start()
+        const rt = makeRuntime(clockMachine.provide({ services: { ticker: mockTicker } })).start()
         expect(cleanup).not.toHaveBeenCalled()
         rt.send('pause')
         expect(cleanup).toHaveBeenCalledTimes(1)
@@ -354,7 +356,7 @@ describe('rt_main_invoke', () => {
     const a = deferred<string>()
     const b = deferred<string>()
 
-    const machine = createMachine(
+    const machine = makeMachine(
       {
         initContext: () => ({ value: '' }),
       },
@@ -377,7 +379,7 @@ describe('rt_main_invoke', () => {
         ],
       }),
     )
-    const rt = createRuntime(machine).start()
+    const rt = makeRuntime(machine).start()
     b.resolve('b')
     await flush()
     expect(rt.states).toEqual(['/root/a/pending', '/root/b/done'])
@@ -388,7 +390,7 @@ describe('rt_main_invoke', () => {
 
   describe('マシンを対象に invoke', () => {
     const makeChild = () =>
-      createMachine(
+      makeMachine(
         {
           initContext: () => ({ count: 0 }),
           output: ({ context }) => ({ total: context.count }),
@@ -403,7 +405,7 @@ describe('rt_main_invoke', () => {
       )
 
     const makeParent = (key: string, child = makeChild()) =>
-      createMachine(
+      makeMachine(
         {
           initContext: () => ({ total: -1 }),
           services: { [key]: child },
@@ -422,7 +424,7 @@ describe('rt_main_invoke', () => {
       )
 
     test('0:state に入ると子マシンが起動し、_children から key で参照できる', async () => {
-      const rt = createRuntime(makeParent('KEY')).start()
+      const rt = makeRuntime(makeParent('KEY')).start()
       const child = rt.getSnapshot()._children.KEY!
       expect(rt.stateValue).toBe('/running')
 
@@ -436,13 +438,13 @@ describe('rt_main_invoke', () => {
     })
 
     test('0:input が子マシンに渡される', async () => {
-      const child = createMachine(
+      const child = makeMachine(
         {
           initContext: (input: { seed: number }) => ({ seed: input.seed }),
         },
         () => ({ a: [] }),
       )
-      const parent = createMachine(
+      const parent = makeMachine(
         {
           initContext: () => ({ seed: 42 }),
           services: { c: child },
@@ -451,12 +453,12 @@ describe('rt_main_invoke', () => {
           A: [invoke('c', { input: ({ c }) => ({ seed: c.seed }) })],
         }),
       )
-      const rt = createRuntime(parent).start()
+      const rt = makeRuntime(parent).start()
       expect((rt.getSnapshot()._children.c as any).context.seed).toBe(42)
     })
 
     test('0:親が state を抜けると子マシンが stop される', async () => {
-      const rt = createRuntime(makeParent('KEY')).start()
+      const rt = makeRuntime(makeParent('KEY')).start()
       const child = rt.getSnapshot()._children.KEY!
       rt.send({ type: 'abort' })
 
@@ -465,7 +467,7 @@ describe('rt_main_invoke', () => {
     })
 
     test('0:停止した子に送ったイベントは親に影響しない', async () => {
-      const rt = createRuntime(makeParent('KEY')).start()
+      const rt = makeRuntime(makeParent('KEY')).start()
       const child = rt.getSnapshot()._children.KEY!
       rt.send({ type: 'abort' })
 
@@ -474,7 +476,7 @@ describe('rt_main_invoke', () => {
     })
 
     test('0:親を stop すると子も stop される', async () => {
-      const rt = createRuntime(makeParent('KEY')).start()
+      const rt = makeRuntime(makeParent('KEY')).start()
       const child = rt.getSnapshot()._children.KEY!
       rt.stop()
       expect(child.runtimeStatus).toBe('stopped')
@@ -482,18 +484,18 @@ describe('rt_main_invoke', () => {
 
     test('0:親の entryHooks が完了してから子の entryHooks が走る', async () => {
       const order: string[] = []
-      const child = createMachine({}, ({ entryHook }) => ({ a: [entryHook(() => order.push('child entry'))] }))
-      const parent = createMachine({}, ({ invoke, entryHook }) => ({
+      const child = makeMachine({}, ({ entryHook }) => ({ a: [entryHook(() => order.push('child entry'))] }))
+      const parent = makeMachine({}, ({ invoke, entryHook }) => ({
         A: [entryHook(() => order.push('parent entry')), invoke(child)],
       }))
-      createRuntime(parent).start()
+      makeRuntime(parent).start()
       expect(order).toEqual(['parent entry', 'child entry'])
     })
   })
 
   describe('複数invoke', () => {
     test('0:マシンと関数を同時に done', async () => {
-      const child = createMachine(
+      const child = makeMachine(
         {
           output: () => 'machine-result',
         },
@@ -504,7 +506,7 @@ describe('rt_main_invoke', () => {
       )
       const fn = async () => 'promise-result'
 
-      const parent = createMachine(
+      const parent = makeMachine(
         {
           types: { context: {} as { m?: string; p?: string } },
           name: 'parent',
@@ -528,7 +530,7 @@ describe('rt_main_invoke', () => {
         }),
       )
 
-      const rt = createRuntime(parent).start()
+      const rt = makeRuntime(parent).start()
       rt.context
       await waitFor(rt, (snapshot) => {
         return snapshot.runtimeStatus === 'done'
@@ -540,7 +542,7 @@ describe('rt_main_invoke', () => {
       const failing = async () => {
         throw new Error('boom')
       }
-      const parent = createMachine(
+      const parent = makeMachine(
         {
           services: { failing },
           initContext: () => ({ err: '' }),
@@ -558,13 +560,13 @@ describe('rt_main_invoke', () => {
         }),
       )
 
-      const rt = createRuntime(parent).start()
+      const rt = makeRuntime(parent).start()
       await waitFor(rt, ({ runtimeStatus }) => runtimeStatus === 'done')
       expect(rt.context.err).toBe('boom')
     })
 
     test('0:inputの受け渡し', async () => {
-      const child = createMachine(
+      const child = makeMachine(
         {
           types: {
             input: {} as { n: number },
@@ -580,7 +582,7 @@ describe('rt_main_invoke', () => {
         }),
       )
 
-      const parent = createMachine(
+      const parent = makeMachine(
         {
           types: { context: {} as { base: number; result?: number } },
           services: { child },
@@ -603,14 +605,14 @@ describe('rt_main_invoke', () => {
         }),
       )
 
-      const rt = createRuntime(parent).start()
+      const rt = makeRuntime(parent).start()
       await waitFor(rt, ({ runtimeStatus }) => runtimeStatus === 'done')
       expect(rt.context.result).toBe(42)
     })
 
     test('0:sendTo で 子マシンに送る', async () => {
       const received = jest.fn()
-      const child = createMachine(
+      const child = makeMachine(
         {
           types: {
             events: {} as { type: 'ping'; v: number },
@@ -628,7 +630,7 @@ describe('rt_main_invoke', () => {
         }),
       )
 
-      const parent = createMachine(
+      const parent = makeMachine(
         {
           services: { child },
           types: { context: {} as { pong?: number }, events: {} as { type: 'go' } },
@@ -643,7 +645,7 @@ describe('rt_main_invoke', () => {
         }),
       )
 
-      const rt = createRuntime(parent).start()
+      const rt = makeRuntime(parent).start()
       rt.send('go')
       await waitFor(rt, (ss) => {
         return ss.runtimeStatus === 'done'
@@ -653,7 +655,7 @@ describe('rt_main_invoke', () => {
     })
 
     test('0:子から親へのemit', async () => {
-      const child = createMachine(
+      const child = makeMachine(
         {
           types: { emitted: {} as { type: 'childEvent'; value: string } },
         },
@@ -662,7 +664,7 @@ describe('rt_main_invoke', () => {
         }),
       )
 
-      const parent = createMachine(
+      const parent = makeMachine(
         {
           services: { child },
           types: { context: {} as { got?: string } },
@@ -684,7 +686,7 @@ describe('rt_main_invoke', () => {
         }),
       )
 
-      const rt = createRuntime(parent).start()
+      const rt = makeRuntime(parent).start()
       await waitFor(rt, (ss) => ss.stateValue === '/received')
       expect(rt.context.got).toBe('hello')
     })
@@ -695,7 +697,7 @@ describe('rt_main_invoke', () => {
         throw new Error('B-failed')
       }
 
-      const parent = createMachine(
+      const parent = makeMachine(
         {
           services: { a, b },
           initContext: () => ({}) as { a?: string; b?: string },
@@ -728,7 +730,7 @@ describe('rt_main_invoke', () => {
         }),
       )
 
-      const rt = createRuntime(parent).start()
+      const rt = makeRuntime(parent).start()
       await waitFor(rt, (ss) => ss.runtimeStatus === 'done')
       expect(rt.states).toEqual(['/a/r1/done', '/a/r2/failed'])
       expect(rt.context).toEqual({ a: 'A', b: 'B-failed' })

@@ -43,7 +43,7 @@ type X_RemovePrivateKeys<T extends Record<string, unknown>> = {
   [K in keyof T as K extends `_${string}` ? never : K]: T[K]
 }
 
-export function createRuntime<M extends AnyMachine>(
+export function makeRuntime<M extends AnyMachine>(
   machine: M,
   option?: RuntimeOptions<InferMInput<M>>,
 ) {

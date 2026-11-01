@@ -1,6 +1,6 @@
 import type {
-  AnyMachine,
   ActionFnParams,
+  AnyMachine,
   BuiltinEventBody,
   CheckFn,
   EmittedEvent,
@@ -35,7 +35,7 @@ import { SystemEventSymbol } from '../machine/m.types'
 import { ST_DELIM } from '../shared/constants'
 import type { Placeholder, RecursiveRecord, Values } from '../shared/general.types'
 import { deepFreeze, parentPathOf, splitStPath } from '../shared/utils'
-import { createRuntime, Runtime } from './Runtime'
+import { makeRuntime, Runtime } from './Runtime'
 import type { Children, RuntimeOutbound, StateRoute } from './r.types'
 import {
   readyToEvalGuard,
@@ -254,10 +254,8 @@ function x_findDeepestTransitions(
 
 // ==
 
-function o_unwrapSystemEvent(
-  event: EventBody | BuiltinEventBody | SystemEventBody
-): EventBody | BuiltinEventBody {
-  return (!(SystemEventSymbol in event && event.payload)) ? event : event.payload
+function o_unwrapSystemEvent(event: EventBody | BuiltinEventBody | SystemEventBody): EventBody | BuiltinEventBody {
+  return !(SystemEventSymbol in event && event.payload) ? event : event.payload
 }
 
 function o_evalActionParams<C extends MContext, Ex extends EventBody, I>(
@@ -278,7 +276,7 @@ export function readyAction<
   A extends Record<string, Placeholder>,
   S extends ServiceRecord,
   Exr extends E | BuiltinEventBody | SystemEventBody,
-  Ex extends E | BuiltinEventBody = Exclude<Exr, SystemEventBody>
+  Ex extends E | BuiltinEventBody = Exclude<Exr, SystemEventBody>,
 >(
   origContext: C,
   rawEvent: Exr,
@@ -382,7 +380,7 @@ export function readyAction<
         transitionAction,
         machineActions,
       )
-      const qEvent = !eventOverride ? event : o_unwrapSystemEvent(eventOverride) as Exx
+      const qEvent = !eventOverride ? event : (o_unwrapSystemEvent(eventOverride) as Exx)
       if (bodies.length === 1) {
         bodies[0]({
           context,
@@ -703,18 +701,20 @@ function o_handleInvokedFnResult(
 ) {
   const { signal } = abortController
   if (typeof output === 'function') {
-    signal.aborted ? output() : setChild({
-      stop: () => {
-        abortController.abort()
-        output()
-      },
-    })
+    signal.aborted
+      ? output()
+      : setChild({
+        stop: () => {
+          abortController.abort()
+          output()
+        },
+      })
   } else if (!signal.aborted) {
     rtOutbound.enqueueEvent(
       {
         type: `invoke/:done:[${invocationIdx}]` as const,
         payload: { type: ':done:', output },
-        [SystemEventSymbol]: true
+        [SystemEventSymbol]: true,
       },
       { path },
     )
@@ -752,28 +752,34 @@ export function launchInvocations<E extends EventBody, S extends ServiceRecord>(
 
     switch (srcType) {
       case 'machine': {
-        const childRt = createRuntime(srcValue as AnyMachine, {
+        const childRt = makeRuntime(srcValue as AnyMachine, {
           id: `${rtOutbound.id}/${childKey}`,
           input: () => inputValue,
         })
         setChild(childRt)
         childRt.subscribe(({ runtimeStatus, output }) => {
           if (runtimeStatus === 'done') {
-            enqueueEvent({
-              type: `invoke/:done:[${i}]` as const,
-              payload: { type: ':done:', output },
-              [SystemEventSymbol]: true,
-            }, { path })
+            enqueueEvent(
+              {
+                type: `invoke/:done:[${i}]` as const,
+                payload: { type: ':done:', output },
+                [SystemEventSymbol]: true,
+              },
+              { path },
+            )
           }
           // TODO: 'invoke/:error:'
         })
         for (const eType of emittedETypesToListen) {
           childRt.onEmitted(eType, (emittedEvent) => {
-            enqueueEvent({
-              type: `invoke/${eType}[${i}]` as const,
-              payload: emittedEvent,
-              [SystemEventSymbol]: true,
-            }, { path })
+            enqueueEvent(
+              {
+                type: `invoke/${eType}[${i}]` as const,
+                payload: emittedEvent,
+                [SystemEventSymbol]: true,
+              },
+              { path },
+            )
           })
         }
         childRt.start()
@@ -789,14 +795,24 @@ export function launchInvocations<E extends EventBody, S extends ServiceRecord>(
           ) {
             throw new Error(`Invalid emittedEvent: ${JSON.stringify(emittedEvent)}`)
           }
-          enqueueEvent({ type: `invoke/${emittedEvent?.type}[${i}]` as const, payload: emittedEvent, [SystemEventSymbol]: true }, { path })
+          enqueueEvent(
+            { type: `invoke/${emittedEvent?.type}[${i}]` as const, payload: emittedEvent, [SystemEventSymbol]: true },
+            { path },
+          )
         }
         const result = (() => {
           try {
             return (srcValue as ServiceFn)(inputValue, emit, signal)
           } catch (error) {
             if (!signal.aborted) {
-              enqueueEvent({ type: `invoke/:error:[${i}]` as const, payload: { type: ':error:', error }, [SystemEventSymbol]: true }, { path })
+              enqueueEvent(
+                {
+                  type: `invoke/:error:[${i}]` as const,
+                  payload: { type: ':error:', error },
+                  [SystemEventSymbol]: true,
+                },
+                { path },
+              )
             }
           }
         })()
@@ -804,10 +820,18 @@ export function launchInvocations<E extends EventBody, S extends ServiceRecord>(
           o_handleInvokedFnResult(result, path, i, abortController, rtOutbound, setChild)
           return
         }
-        result.then((output) => o_handleInvokedFnResult(output, path, i, abortController, rtOutbound, setChild))
+        result
+          .then((output) => o_handleInvokedFnResult(output, path, i, abortController, rtOutbound, setChild))
           .catch((error) => {
             if (!signal.aborted) {
-              enqueueEvent({ type: `invoke/:error:[${i}]` as const, payload: { type: ':error:', error }, [SystemEventSymbol]: true }, { path })
+              enqueueEvent(
+                {
+                  type: `invoke/:error:[${i}]` as const,
+                  payload: { type: ':error:', error },
+                  [SystemEventSymbol]: true,
+                },
+                { path },
+              )
             }
           })
         break

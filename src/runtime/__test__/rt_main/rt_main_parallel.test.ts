@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, jest, mock, test } from 'bun:test'
-import { createMachine } from '../../../machine/createMachine'
+import { makeMachine } from '../../../machine/machine'
 import type { Runtime } from '../../Runtime'
-import { createRuntime } from '../../Runtime'
+import { makeRuntime } from '../../Runtime'
 
 describe('rt_main/parallel', () => {
   describe('parallel', () => {
@@ -10,7 +10,7 @@ describe('rt_main/parallel', () => {
         ({ update, c }: any) =>
           update({ trace: [...c.trace, name] })
 
-    const machine = createMachine(
+    const machine = makeMachine(
       {
         types: {
           context: {} as { trace: string[]; result?: unknown },
@@ -107,13 +107,13 @@ describe('rt_main/parallel', () => {
       expect([...actual].sort()).toEqual([...expected].sort())
 
     test('0:開始すると idle に入る', async () => {
-      const rt = createRuntime(machine).start()
+      const rt = makeRuntime(machine).start()
       const take = makeTracer(rt)
       expect(take()).toEqual(['idle:entry'])
     })
 
     test('0:send "start" で全リージョンのentryが実行される', async () => {
-      const rt = createRuntime(machine).start()
+      const rt = makeRuntime(machine).start()
       const take = makeTracer(rt)
       take() // 初期分を捨てる
 
@@ -148,7 +148,7 @@ describe('rt_main/parallel', () => {
     })
 
     test('0:複数リージョンで同じイベントが同時に実行', async () => {
-      const rt = createRuntime(machine).start()
+      const rt = makeRuntime(machine).start()
       rt.send('start')
       const take = makeTracer(rt)
       take()
@@ -158,7 +158,7 @@ describe('rt_main/parallel', () => {
     })
 
     test('0:同時に遷移。childDone はまだ動かない。', async () => {
-      const rt = createRuntime(machine).start()
+      const rt = makeRuntime(machine).start()
       rt.send('start')
       const take = makeTracer(rt)
       take()
@@ -181,7 +181,7 @@ describe('rt_main/parallel', () => {
     })
 
     test('0:入れ子のparallel の片方だけ完了では childDoneにならない', async () => {
-      const rt = createRuntime(machine).start()
+      const rt = makeRuntime(machine).start()
       rt.send('start')
       rt.send('go_all')
       const take = makeTracer(rt)
@@ -199,7 +199,7 @@ describe('rt_main/parallel', () => {
     })
 
     test('0:全リージョンの終了で childDone が動き /finishedに遷移', async () => {
-      const rt = createRuntime(machine).start()
+      const rt = makeRuntime(machine).start()
       rt.send('start')
       rt.send('go_all')
       rt.send('go_c1')
@@ -262,7 +262,7 @@ describe('rt_main/parallel', () => {
     })
 
     test('0: childDone の output の内容確認', async () => {
-      const rt = createRuntime(machine).start()
+      const rt = makeRuntime(machine).start()
       rt.send('start')
       rt.send('go_all')
       rt.send('go_c1')
@@ -277,7 +277,7 @@ describe('rt_main/parallel', () => {
     })
 
     test('0:イベントの順序が違っても動く', async () => {
-      const rt = createRuntime(machine).start()
+      const rt = makeRuntime(machine).start()
       rt.send('start')
       rt.send('go_c2')
       rt.send('go_c1')
@@ -296,7 +296,7 @@ describe('rt_main/parallel', () => {
     })
 
     test('0:', async () => {
-      const rt = createRuntime(machine).start()
+      const rt = makeRuntime(machine).start()
       rt.send('start')
       rt.send('go_all')
       rt.send('go_c1')

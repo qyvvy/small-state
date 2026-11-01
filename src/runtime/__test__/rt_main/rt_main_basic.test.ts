@@ -1,10 +1,10 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, jest, mock, test } from 'bun:test'
-import { createMachine } from '../../../machine/createMachine'
-import { createRuntime } from '../../Runtime'
+import { makeMachine } from '../../../machine/machine'
+import { makeRuntime } from '../../Runtime'
 
 describe('rt_main/basic', () => {
   describe('単純な遷移の確認', () => {
-    const stoplightMachine = createMachine(
+    const stoplightMachine = makeMachine(
       {
         types: {
           events: {} as { type: 'timer' } | { type: 'powerOutage' } | { type: 'powerRestored' },
@@ -24,7 +24,7 @@ describe('rt_main/basic', () => {
     stoplightMachine
 
     test('1: start 前', async () => {
-      const stoplightRt = createRuntime(stoplightMachine)
+      const stoplightRt = makeRuntime(stoplightMachine)
       expect(stoplightRt.states).toEqual([])
     })
 
@@ -32,7 +32,7 @@ describe('rt_main/basic', () => {
       //const unsubscribe1 = stoplightRt.subscribe(observer1)
       //const unsubscribe2 = stoplightRt.subscribe(observer2)
       const observer = jest.fn()
-      const stoplightRt = createRuntime(stoplightMachine)
+      const stoplightRt = makeRuntime(stoplightMachine)
       stoplightRt.subscribe(observer)
       expect(observer).toHaveBeenCalledTimes(0)
 
@@ -44,7 +44,7 @@ describe('rt_main/basic', () => {
 
     test('2: send 1', async () => {
       const observer = jest.fn()
-      const stoplightRt = createRuntime(stoplightMachine)
+      const stoplightRt = makeRuntime(stoplightMachine)
       stoplightRt.subscribe(observer)
       expect(observer).toHaveBeenCalledTimes(0)
 
@@ -58,7 +58,7 @@ describe('rt_main/basic', () => {
 
     test('2: send unknown event', async () => {
       const observer = jest.fn()
-      const stoplightRt = createRuntime(stoplightMachine)
+      const stoplightRt = makeRuntime(stoplightMachine)
       stoplightRt.subscribe(observer)
       expect(observer).toHaveBeenCalledTimes(0)
 
@@ -77,7 +77,7 @@ describe('rt_main/basic', () => {
 
     test('2: send 2', async () => {
       const observer = jest.fn()
-      const stoplightRt = createRuntime(stoplightMachine)
+      const stoplightRt = makeRuntime(stoplightMachine)
       stoplightRt.subscribe(observer)
       expect(observer).toHaveBeenCalledTimes(0)
 
@@ -96,7 +96,7 @@ describe('rt_main/basic', () => {
 
     test('2: send 3', async () => {
       const observer = jest.fn()
-      const stoplightRt = createRuntime(stoplightMachine)
+      const stoplightRt = makeRuntime(stoplightMachine)
       stoplightRt.subscribe(observer)
       expect(observer).toHaveBeenCalledTimes(0)
 
@@ -114,7 +114,7 @@ describe('rt_main/basic', () => {
 
     test('2: send powerOutage', async () => {
       const observer = jest.fn()
-      const stoplightRt = createRuntime(stoplightMachine)
+      const stoplightRt = makeRuntime(stoplightMachine)
       stoplightRt.subscribe(observer)
       expect(observer).toHaveBeenCalledTimes(0)
 
@@ -132,7 +132,7 @@ describe('rt_main/basic', () => {
 
     test('2: send powerOutage and timer', async () => {
       const observer = jest.fn()
-      const stoplightRt = createRuntime(stoplightMachine)
+      const stoplightRt = makeRuntime(stoplightMachine)
       stoplightRt.subscribe(observer)
       expect(observer).toHaveBeenCalledTimes(0)
 
@@ -153,7 +153,7 @@ describe('rt_main/basic', () => {
 
     test('2: send powerRestored', async () => {
       const observer = jest.fn()
-      const stoplightRt = createRuntime(stoplightMachine)
+      const stoplightRt = makeRuntime(stoplightMachine)
       stoplightRt.subscribe(observer)
       expect(observer).toHaveBeenCalledTimes(0)
 
@@ -173,7 +173,7 @@ describe('rt_main/basic', () => {
   })
 
   describe('停止したマシンは動かせない確認', () => {
-    const machine = createMachine({
+    const machine = makeMachine({
       name: 'counter',
       initContext: () => ({ count: 0 })
     }, ({ on }) => ({
@@ -185,7 +185,7 @@ describe('rt_main/basic', () => {
     }))
 
     test('0:start 前に send しても何も起こらない', async () => {
-      const rt = createRuntime(machine)
+      const rt = makeRuntime(machine)
       expect(rt.runtimeStatus).toBe('notStarted')
       expect(rt.stateValue).toBeUndefined()
       rt.send({ type: 'inc' })
@@ -195,7 +195,7 @@ describe('rt_main/basic', () => {
     })
 
     test('0:stop 後に send しても何も起こらない', async () => {
-      const rt = createRuntime(machine).start()
+      const rt = makeRuntime(machine).start()
       rt.stop()
       expect(rt.runtimeStatus).toBe('stopped')
       const snapshotBefore = rt.getSnapshot()
@@ -206,7 +206,7 @@ describe('rt_main/basic', () => {
     })
 
     test('0:stop したものを 再 start できない', async () => {
-      const rt = createRuntime(machine).start()
+      const rt = makeRuntime(machine).start()
       rt.stop()
       expect(rt.runtimeStatus).toBe('stopped')
       rt.start()
@@ -214,7 +214,7 @@ describe('rt_main/basic', () => {
     })
 
     test('0:done 後に send しても何も起こらない', async () => {
-      const rt = createRuntime(machine).start()
+      const rt = makeRuntime(machine).start()
       rt.send({ type: 'finish' })
       expect(rt.stateValue).toBe('/done')
       expect(rt.runtimeStatus).toBe('done')
@@ -227,7 +227,7 @@ describe('rt_main/basic', () => {
     })
 
     test('0:done したものを 再 start できない', async () => {
-      const rt = createRuntime(machine).start()
+      const rt = makeRuntime(machine).start()
       rt.send({ type: 'finish' })
       expect(rt.runtimeStatus).toBe('done')
       rt.start()
@@ -237,7 +237,7 @@ describe('rt_main/basic', () => {
   })
 
   describe('guard と actins の確認', () => {
-    const loginMachine = createMachine(
+    const loginMachine = makeMachine(
       {
         name: 'login',
         types: {
@@ -270,14 +270,14 @@ describe('rt_main/basic', () => {
     )
 
     test('1: 1回目のログイン失敗ではロックされない', async () => {
-      const loginRt = createRuntime(loginMachine).start()
+      const loginRt = makeRuntime(loginMachine).start()
       loginRt.send('LOGIN_FAILED')
       expect(loginRt.states).toEqual(['/idle'])
       expect(loginRt.context.failedAttempts).toBe(1)
     })
 
     test('2: 2回目のログイン失敗でもロックされない', async () => {
-      const loginRt = createRuntime(loginMachine).start()
+      const loginRt = makeRuntime(loginMachine).start()
       loginRt.send('LOGIN_FAILED')
       loginRt.send('LOGIN_FAILED')
       expect(loginRt.states).toEqual(['/idle'])
@@ -286,7 +286,7 @@ describe('rt_main/basic', () => {
     })
 
     test('3: 3回目のログイン失敗でロックされる', async () => {
-      const loginRt = createRuntime(loginMachine).start()
+      const loginRt = makeRuntime(loginMachine).start()
       loginRt.send('LOGIN_FAILED')
       loginRt.send('LOGIN_FAILED')
       loginRt.send('LOGIN_FAILED')
@@ -297,7 +297,7 @@ describe('rt_main/basic', () => {
 
     test('4: observer', async () => {
       const observer = jest.fn()
-      const loginRt = createRuntime(loginMachine)
+      const loginRt = makeRuntime(loginMachine)
       loginRt.subscribe(observer)
       expect(observer).toHaveBeenCalledTimes(0)
 
@@ -378,7 +378,7 @@ describe('rt_main/basic', () => {
   })
 
   describe('entry と exit と always', () => {
-    const orderMachine = createMachine(
+    const orderMachine = makeMachine(
       {
         types: { input: {} as { stock: number }, events: {} as { type: 'CONFIRM' } },
         name: 'order',
@@ -400,7 +400,7 @@ describe('rt_main/basic', () => {
     )
 
     test('1:在庫がある場合、checking の entry → always → exit → shipping の entry が実行される', async () => {
-      const orderRt = createRuntime(orderMachine, { input: () => ({ stock: 1 }) }).start()
+      const orderRt = makeRuntime(orderMachine, { input: () => ({ stock: 1 }) }).start()
       expect(orderRt.stateValue).toBe('/pending')
       orderRt.send('CONFIRM')
       expect(orderRt.stateValue).toBe('/shipping')
@@ -408,7 +408,7 @@ describe('rt_main/basic', () => {
     })
 
     test('2:在庫がない場合、outOfStock に遷移する', async () => {
-      const orderRt = createRuntime(orderMachine, { input: () => ({ stock: 0 }) }).start()
+      const orderRt = makeRuntime(orderMachine, { input: () => ({ stock: 0 }) }).start()
       expect(orderRt.stateValue).toBe('/pending')
       orderRt.send('CONFIRM')
       expect(orderRt.stateValue).toBe('/outOfStock')
@@ -417,7 +417,7 @@ describe('rt_main/basic', () => {
   })
 
   describe('always の連鎖', () => {
-    const orderMachine = createMachine(
+    const orderMachine = makeMachine(
       {
         types: { input: {} as { isValid: boolean } },
         name: 'order',
@@ -454,7 +454,7 @@ describe('rt_main/basic', () => {
     )
 
     test('1:always による遷移が連鎖して completed まで到達する', async () => {
-      const runtime = createRuntime(orderMachine, { input: () => ({ isValid: true }) }).start()
+      const runtime = makeRuntime(orderMachine, { input: () => ({ isValid: true }) }).start()
       runtime.send({ type: 'START' })
       expect(runtime.stateValue).toBe('/completed')
       expect(runtime.context.trace).toEqual([
@@ -470,7 +470,7 @@ describe('rt_main/basic', () => {
     })
 
     test('2:isValid が false だと checking から invalid に飛ぶ', async () => {
-      const runtime = createRuntime(orderMachine, { input: () => ({ isValid: false }) }).start()
+      const runtime = makeRuntime(orderMachine, { input: () => ({ isValid: false }) }).start()
       runtime.send({ type: 'START' })
       expect(runtime.stateValue).toBe('/invalid')
       expect(runtime.runtimeStatus).toBe('done')

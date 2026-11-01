@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, jest, test } from 'bun:test'
-import { __test__, createMachine } from '../createMachine'
+import { __test__, makeMachine } from '../machine'
 
 const { getDefinitionAndCatalog } = __test__
 
@@ -1371,7 +1371,7 @@ describe('machine', () => {
           services: {
             increment: async (count: number) => count + 1,
             log: async (msg: string) => console.log(msg),
-            subMachine: createMachine({
+            subMachine: makeMachine({
               types: { emitted: {} as { type: 'EMITTED1' } | { type: 'EMITTED2' } }
             }, () => ({ foo: [] }))
           },

@@ -1,11 +1,11 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, jest, mock, test } from 'bun:test'
-import { createMachine } from '../../../machine/createMachine'
-import { createRuntime } from '../../Runtime'
+import { makeMachine } from '../../../machine/machine'
+import { makeRuntime } from '../../Runtime'
 
 describe('rt_main_enqueue', () => {
   test('1:名前付きアクションを順番に実行する', async () => {
     const calls: string[] = []
-    const machine = createMachine({
+    const machine = makeMachine({
       actions: {
         first: () => calls.push('first'),
         second: () => calls.push('second'),
@@ -16,12 +16,12 @@ describe('rt_main_enqueue', () => {
         enqueue('second')
       })]
     }))
-    createRuntime(machine).start()
+    makeRuntime(machine).start()
     expect(calls).toEqual(['first', 'second'])
   })
 
   test('2:インライン。enqueueした順番で呼ばれる。', async () => {
-    const machine = createMachine({
+    const machine = makeMachine({
       initContext: () => ({ count: 0 }),
     }, ({ entryHook }) => ({
       a: [entryHook(({ enqueue, c, update }) => {
@@ -32,13 +32,13 @@ describe('rt_main_enqueue', () => {
         enqueue(({ c }) => update({ count: c.count + 1 }))
       })]
     }))
-    const rt = createRuntime(machine).start()
+    const rt = makeRuntime(machine).start()
     expect(rt.context.count).toBe(2)
   })
 
   test('3:event に応じて enqueue 内容を切り替えられる', async () => {
     const calls: string[] = []
-    const machine = createMachine({
+    const machine = makeMachine({
       types: {
         events: {} as { type: 'go', flag: boolean }
       },
@@ -56,7 +56,7 @@ describe('rt_main_enqueue', () => {
         })
       ]
     }))
-    const rt = createRuntime(machine).start()
+    const rt = makeRuntime(machine).start()
     rt.send({ type: 'go', flag: true })
     rt.send({ type: 'go', flag: false })
     expect(calls).toEqual(['yes', 'no'])
@@ -64,7 +64,7 @@ describe('rt_main_enqueue', () => {
 
   test('4:check', async () => {
     const spy = jest.fn()
-    const machine = createMachine({
+    const machine = makeMachine({
       types: {
         context: {} as { ok: boolean },
       },
@@ -82,13 +82,13 @@ describe('rt_main_enqueue', () => {
         }),
       ]
     }))
-    createRuntime(machine).start()
+    makeRuntime(machine).start()
     expect(spy).toHaveBeenCalledTimes(1)
   })
 
   test('5:param 付き enqueue', async () => {
     const spy = jest.fn()
-    const machine = createMachine({
+    const machine = makeMachine({
       actions: {
         log: (_, params: { msg: string }) => spy(params.msg),
       },
@@ -99,13 +99,13 @@ describe('rt_main_enqueue', () => {
         }),
       ]
     }))
-    createRuntime(machine).start()
+    makeRuntime(machine).start()
     expect(spy).toHaveBeenCalledWith('hello')
   })
 
   test('6:何もしない enqueue でエラーにならない', async () => {
     const spy = jest.fn()
-    const machine = createMachine({
+    const machine = makeMachine({
       initContext: () => ({ n: 0 }),
     }, ({ entryHook }) => ({
       a: [
@@ -114,13 +114,13 @@ describe('rt_main_enqueue', () => {
         }),
       ]
     }))
-    const rt = createRuntime(machine).start()
+    const rt = makeRuntime(machine).start()
     expect(rt.context.n).toBe(0)
   })
 
   test('7:ネストした enqueue はサポート外', async () => {
     const calls: string[] = []
-    const machine = createMachine({
+    const machine = makeMachine({
     }, ({ entryHook }) => ({
       a: [
         entryHook(({ enqueue }) => {
@@ -131,12 +131,12 @@ describe('rt_main_enqueue', () => {
         }),
       ]
     }))
-    expect(() => createRuntime(machine).start()).toThrow()
+    expect(() => makeRuntime(machine).start()).toThrow()
   })
 
   test('8: exit', async () => {
     const calls: string[] = []
-    const machine = createMachine({
+    const machine = makeMachine({
       actions: { bye: () => calls.push('bye') }
     }, ({ exitHook, on }) => ({
       a: [
@@ -147,7 +147,7 @@ describe('rt_main_enqueue', () => {
       ],
       b: []
     }))
-    const rt = createRuntime(machine).start()
+    const rt = makeRuntime(machine).start()
     rt.send({ type: 'next' })
     expect(calls).toEqual(['bye'])
   })

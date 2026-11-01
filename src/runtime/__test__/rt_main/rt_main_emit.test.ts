@@ -1,10 +1,10 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, jest, mock, test } from 'bun:test'
-import { createMachine } from '../../../machine/createMachine'
-import { createRuntime } from '../../Runtime'
+import { makeMachine } from '../../../machine/machine'
+import { makeRuntime } from '../../Runtime'
 
 
 describe('rt_main_emit', () => {
-  const counterMachine = createMachine({
+  const counterMachine = makeMachine({
     name: 'counter',
     types: {
       events: {} as { type: 'inc' } | { type: 'reset' },
@@ -27,7 +27,7 @@ describe('rt_main_emit', () => {
   ])
 
   test('0:inc で incremented が emit される', async () => {
-    const rt = createRuntime(counterMachine).start()
+    const rt = makeRuntime(counterMachine).start()
     const handler = jest.fn()
     rt.onEmitted('incremented', handler)
     rt.send({ type: 'inc' })
@@ -37,7 +37,7 @@ describe('rt_main_emit', () => {
   })
 
   test('0:複数回 send すると、その回数だけ emit される', async () => {
-    const rt = createRuntime(counterMachine).start()
+    const rt = makeRuntime(counterMachine).start()
     const handler = jest.fn()
     rt.onEmitted('incremented', handler)
     rt.send({ type: 'inc' })
@@ -47,7 +47,7 @@ describe('rt_main_emit', () => {
   })
 
   test('0:reset では emit されない', async () => {
-    const rt = createRuntime(counterMachine).start()
+    const rt = makeRuntime(counterMachine).start()
     const handler = jest.fn()
     rt.onEmitted('incremented', handler)
     rt.send({ type: 'reset' })
@@ -56,7 +56,7 @@ describe('rt_main_emit', () => {
   })
 
   test('0:unsubscribe 後は呼ばれない', async () => {
-    const rt = createRuntime(counterMachine).start()
+    const rt = makeRuntime(counterMachine).start()
     const handler = jest.fn()
     const sub = rt.onEmitted('incremented', handler)
     rt.send({ type: 'inc' })

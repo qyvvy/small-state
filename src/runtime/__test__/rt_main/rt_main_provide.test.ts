@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, jest, mock, test } from 'bun:test'
-import { createMachine } from '../../../machine/createMachine'
-import { createRuntime } from '../../Runtime'
+import { makeMachine } from '../../../machine/machine'
+import { makeRuntime } from '../../Runtime'
 
 describe('rt_main/provide', () => {
   let mockFn1: jest.Mock
@@ -14,7 +14,7 @@ describe('rt_main/provide', () => {
       mockFn1 = jest.fn()
     })
 
-    const lockMachine = createMachine({
+    const lockMachine = makeMachine({
       name: 'lock',
       types: {
         context: {} as { entered: string; attempts: number },
@@ -49,7 +49,7 @@ describe('rt_main/provide', () => {
       const testMachine = lockMachine.provide({
         actions: { alarm }
       })
-      const rt = createRuntime(testMachine).start()
+      const rt = makeRuntime(testMachine).start()
 
       // 間違った番号を 3 回送信
       for (let i = 0; i < 3; i++) {
@@ -68,7 +68,7 @@ describe('rt_main/provide', () => {
           isCorrect: () => true
         }
       })
-      const rt = createRuntime(testMachine).start()
+      const rt = makeRuntime(testMachine).start()
       rt.send('submit')
 
       expect(rt.stateValue).toBe('/unlocked')
@@ -77,7 +77,7 @@ describe('rt_main/provide', () => {
     test('0:.provide は元のマシンを変更しない', async () => {
       lockMachine.provide({ guards: { isCorrect: () => true } })
 
-      const rt = createRuntime(lockMachine).start()
+      const rt = makeRuntime(lockMachine).start()
       rt.send({ type: 'submit' })
       expect(rt.stateValue).toBe('/idle')
       expect(rt.context.attempts).toBe(1)

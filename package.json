@@ -1,6 +1,6 @@
 {
   "name": "small-state",
-  "version": "0.0.3",
+  "version": "0.1.0",
   "description": "A state machine inspired by XState.",
   "author": "qyvvy",
   "license": "MIT",
@@ -38,7 +38,8 @@
     "typescript": "~5.8.3"
   },
   "scripts": {
-    "compile": "tsdown src/index.ts --format esm,cjs --dts",
+    "build": "tsdown src/index.ts --format esm,cjs --dts",
+    "compile": "bun run build",
     "typecheck": "tsc --noEmit",
     "prepack": "bun compile"
   },

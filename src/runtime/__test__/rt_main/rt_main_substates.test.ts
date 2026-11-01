@@ -1,10 +1,10 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, jest, mock, test } from 'bun:test'
-import { createMachine } from '../../../machine/createMachine'
-import { createRuntime } from '../../Runtime'
+import { makeMachine } from '../../../machine/machine'
+import { makeRuntime } from '../../Runtime'
 
 describe('rt_main/subStates', () => {
   describe('subState', () => {
-    const orderMachine = createMachine(
+    const orderMachine = makeMachine(
       {
         name: 'order',
         types: {
@@ -65,7 +65,7 @@ describe('rt_main/subStates', () => {
     )
 
     test('1:subState 内の always から自動で兄弟ステートに遷移', async () => {
-      const rt = createRuntime(orderMachine, {
+      const rt = makeRuntime(orderMachine, {
         input: () => ({ amount: 100, balance: 0 }),
       }).start()
       expect(rt.stateValue).toEqual('/idle')
@@ -78,7 +78,7 @@ describe('rt_main/subStates', () => {
     })
 
     test('2: childDone 1', async () => {
-      const rt = createRuntime(orderMachine, {
+      const rt = makeRuntime(orderMachine, {
         input: () => ({ amount: 0, balance: 0 }),
       }).start()
       expect(rt.stateValue).toEqual('/idle')
@@ -100,7 +100,7 @@ describe('rt_main/subStates', () => {
     test('2: childDone 2', async () => {
       const mockFn1 = jest.fn()
       //orderMachine.actions.logValidated = mockFn1
-      const rt = createRuntime(orderMachine, {
+      const rt = makeRuntime(orderMachine, {
         input: () => ({ amount: 100, balance: 0 }),
       }).start()
       expect(rt.stateValue).toEqual('/idle')
@@ -116,7 +116,7 @@ describe('rt_main/subStates', () => {
     })
 
     test('3: 残高balance が足りてるので success に移行', async () => {
-      const rt = createRuntime(orderMachine, {
+      const rt = makeRuntime(orderMachine, {
         input: () => ({ amount: 100, balance: 200 }),
       }).start()
 
@@ -135,7 +135,7 @@ describe('rt_main/subStates', () => {
     })
 
     test('3: 残高balance が足りないので failed に移行', async () => {
-      const rt = createRuntime(orderMachine, {
+      const rt = makeRuntime(orderMachine, {
         input: () => ({ amount: 100, balance: 0 }),
       }).start()
 
