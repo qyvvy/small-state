@@ -1,6 +1,7 @@
 import type {
   AnyMachine,
   BuiltinEventBody,
+  DoneEBody,
   InternalEPayload,
   MContext,
   PureETypeString,
@@ -127,7 +128,7 @@ export class Runtime<
     if (this.#isStarted) return this
     this.#isStarted = true
 
-    const { context, hasTransitioned } = initRuntime(
+    const { context, hasTransitioned, doneEvent } = initRuntime(
       this.#realContext,
       this.#input,
       this.#crrStates,
@@ -135,7 +136,7 @@ export class Runtime<
       this.#outbound,
     )
 
-    this.#buildAndSetSnapshot(context, hasTransitioned, 'active')({ type: ':init:' } as E<Mt>)
+    this.#buildAndSetSnapshot(context, hasTransitioned, 'active')(doneEvent)
     this.#sentQueue.start()
     return this
   }
@@ -196,10 +197,10 @@ export class Runtime<
       this.#outbound,
     )
     {
-      const { context, crrStates, hasTransitioned } = result
+      const { context, crrStates, hasTransitioned, doneEvent } = result
       this.#crrStates = crrStates
 
-      this.#buildAndSetSnapshot(context, hasTransitioned)(event as E<Mt>)
+      this.#buildAndSetSnapshot(context, hasTransitioned)(doneEvent)
     }
   }
 
@@ -257,12 +258,12 @@ export class Runtime<
         )
     }
 
-    return (event: E<Mt> = {} as E<Mt>) => {
+    return (doneEvent?: DoneEBody<unknown>) => {
       if (!(hasTransitioned || contextUpdated || runtimeStatus)) {
         return
       }
       const { stateCatalog, output } = this.#machineInternal
-      const isCompleted = !states.length ? false : states.every((stPath) => stateCatalog.get(stPath)?.def.final)
+      const isCompleted = !!(doneEvent || states.length && states.every((stPath) => stateCatalog.get(stPath)?.def.final))
 
       this.#snapshot = {
         runtimeId: this.id,
@@ -275,7 +276,9 @@ export class Runtime<
         runtimeStatus: isCompleted ? 'done' : runtimeStatus || oldSnapshot.runtimeStatus,
         output: !(isCompleted && output)
           ? undefined
-          : output(runtimeUtils.makeFnBaseParam(newRealContext, event, this.#input)),
+          : output(runtimeUtils.makeFnBaseParam(
+            newRealContext, (doneEvent || { type: ':done:', output: undefined }), this.#input
+          )),
         _children: this.#outbound.children,
       }
 

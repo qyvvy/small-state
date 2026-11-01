@@ -11,8 +11,8 @@ export const InvokeSymbol: unique symbol = Symbol('Invoke')
 export type ChildDoneEBody = { type: ':childDone:', output: unknown }
 export type BuiltinEType = ':always:' | ChildDoneEBody['type']
 export type BuiltinEventBody = { type: BuiltinEType;[key: string]: any }
-export type IvkDoneEBody<O> = { type: ':done:', output: O }
-export type IvkErrorEBody = { type: ':error:', error: unknown }
+export type DoneEBody<O> = { type: ':done:', output: O }
+export type ErrorEBody = { type: ':error:', error: unknown }
 
 export const SystemEventSymbol: unique symbol = Symbol('SystemEvent')
 export type SystemEventBody =
@@ -219,7 +219,7 @@ export type MachineConfig<
   name?: string
   initialState?: StateName
   initContext?: (input: I) => LowInfer<C>
-  output?: (arg: FnBaseParams<C, E, I>[0]) => O // マシンが最終状態になったときに実行される
+  output?: (arg: FnBaseParams<C, DoneEBody<unknown>, I>[0]) => O
   guards?: { [K in keyof G]: (arg: FnBaseParams<C, E, I>[0], params: G[K]) => boolean }
   actions?: { [K in keyof A & string]: (arg: LimitedActionFnParams<C, E, I, EM>[0], params: A[K]) => unknown }
   services?: S
@@ -247,7 +247,7 @@ export type Machine<
   internal: {
     [MachineSymbol]: true
     initContext: undefined | ((input: I) => C)
-    output: undefined | ((arg: FnBaseParams<C, E, I, unknown>[0]) => O) // マシンが最終状態になったときに実行される
+    output: undefined | ((arg: FnBaseParams<C, DoneEBody<unknown>, I, unknown>[0]) => O)
     guards: { [K in keyof G]: (arg: FnBaseParams<C, E | BuiltinEventBody, I>[0], params: G[K]) => boolean }
     actions: {
       [K in keyof A]: (arg: LimitedActionFnParams<C, E | BuiltinEventBody, I, EM>[0], params: A[K]) => unknown

@@ -1,5 +1,6 @@
 import type {
   BuiltinEventBody,
+  DoneEBody,
   EmittedEvent,
   EventBody,
   FnBaseParams,
@@ -82,11 +83,11 @@ export function initRuntime<
       tIndex: -1, // dummy
     },
   ]
-  const hasTransitioned = runMicrosteps(tExecs, crrStates, actionRunner, machineInternal, rtOutbound)
+  const [hasTransitioned, doneEvent] = runMicrosteps(tExecs, crrStates, actionRunner, machineInternal, rtOutbound)
 
   {
     const { context } = actionRunner.getResult()
-    return { context, crrStates, hasTransitioned }
+    return { context, crrStates, hasTransitioned, doneEvent }
   }
 }
 
@@ -122,11 +123,11 @@ export function macrostep<
 
   execTExecActions(tExecs, actionRunner, 'transition')
 
-  const hasTransitioned = runMicrosteps(tExecs, crrStates, actionRunner, machineInternal, rtOutbound)
+  const [hasTransitioned, doneEvent] = runMicrosteps(tExecs, crrStates, actionRunner, machineInternal, rtOutbound)
 
   {
     const { context } = actionRunner.getResult()
-    return { context, crrStates, hasTransitioned }
+    return { context, crrStates, hasTransitioned, doneEvent }
   }
 }
 
@@ -149,7 +150,7 @@ function runMicrosteps<
 ) {
   const internalQueue: Array<[EventBody, InternalEPayload]> = []
 
-  let hasTransitioned = runExitAndEntryThenAlways(
+  let [hasTransitioned, doneEvent] = runExitAndEntryThenAlways(
     tExecs,
     crrStates,
     actionRunner,
@@ -174,12 +175,12 @@ function runMicrosteps<
 
     execTExecActions(internalTExecs, actionRunner, event.type, event)
 
-    hasTransitioned =
-      runExitAndEntryThenAlways(internalTExecs, crrStates, actionRunner, machineInternal, rtOutbound, internalQueue) ||
-      hasTransitioned
+      ;[hasTransitioned, doneEvent] =
+        runExitAndEntryThenAlways(internalTExecs, crrStates, actionRunner, machineInternal, rtOutbound, internalQueue) ||
+        hasTransitioned
   }
 
-  return hasTransitioned
+  return [hasTransitioned, doneEvent] as const
 }
 
 function runExitAndEntryThenAlways<
@@ -200,7 +201,7 @@ function runExitAndEntryThenAlways<
   rtOutbound: RuntimeOutbound<E, EM, S>,
   internalQueue: Array<[EventBody, InternalEPayload]>,
 ) {
-  let [alwaysTExecs, hasTransitioned] = exitAndEntry(
+  let [alwaysTExecs, hasTransitioned, doneEvent] = exitAndEntry(
     tExecs,
     crrStates,
     actionRunner,
@@ -212,7 +213,7 @@ function runExitAndEntryThenAlways<
   let i = 0
   while (alwaysTExecs.length) {
     let tmp: boolean
-      ;[alwaysTExecs, tmp] = exitAndEntry(
+      ;[alwaysTExecs, tmp, doneEvent] = exitAndEntry(
         alwaysTExecs,
         crrStates,
         actionRunner,
@@ -225,7 +226,7 @@ function runExitAndEntryThenAlways<
       throw new Error(`Maximum number of microsteps exceeded`)
     }
   }
-  return hasTransitioned
+  return [hasTransitioned, doneEvent] as const
 }
 
 function exitAndEntry<
@@ -245,7 +246,8 @@ function exitAndEntry<
   { guards, services, stateCatalog, definition }: Machine<C, E, I, EM, any, G, A, any, ND>['internal'],
   rtOutbound: RuntimeOutbound<E, EM, S>,
   internalQueue: Array<[EventBody, InternalEPayload]>,
-): [TransitionExec[], hasTransitioned: boolean] {
+): [TransitionExec[], hasTransitioned: boolean, doneEvent: DoneEBody<unknown> | undefined] {
+  let doneEvent: DoneEBody<unknown> | undefined
   const { makeFnBaseParam, execAction, processQueue } = actionRunner
 
   for (const { lca, transition } of tExecs) {
@@ -311,7 +313,11 @@ function exitAndEntry<
           )
         }
         if (final) {
-          accReachedFinal.push([pPath, additional.isRegionChild, final])
+          if (!pPath) {
+            doneEvent = { type: ':done:', output: typeof final === 'function' ? final(makeFnBaseParam()) : undefined }
+          } else {
+            accReachedFinal.push([pPath, additional.isRegionChild, final])
+          }
         }
         i += 1
       }
@@ -328,5 +334,5 @@ function exitAndEntry<
   const alwaysTExecs = evalAlwaysEvent(makeFnBaseParam(), crrStates, guards, stateCatalog)
   execTExecActions(alwaysTExecs, actionRunner, ':always:')
 
-  return [alwaysTExecs, !!stChangingTExecs.length]
+  return [alwaysTExecs, !!stChangingTExecs.length, doneEvent]
 }
