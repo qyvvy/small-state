@@ -58,7 +58,7 @@ type X_DefTypeRefluxer<
   R = unknown,
 > = () => R
 
-type X_DefineStatesParam = {
+type X_DefineStatesTools = {
   on: typeof on
   entryHook: typeof entryHook
   exitHook: typeof exitHook
@@ -213,10 +213,10 @@ function subStates<
   S extends ServiceRecord,
   const D extends { [K in string]: StateDefinition<C, E, I, EM, G, A, S> },
   const Initial extends keyof D & string,
->(stateDefinition: D, initialState?: Initial) {
+>(statesDefinition: D, initialState?: Initial) {
   return [
     (() => SubStatesSymbol) as X_DefTypeRefluxer<C, E, I, EM, G, A, S, BuiltinEType, typeof SubStatesSymbol>,
-    transformNormalizedDefinition(stateDefinition, initialState) as {
+    transformNormalizedDefinition(statesDefinition, initialState) as {
       initial: [Initial] extends [never] ? undefined : Initial
       stateOf: {
         [K in keyof D]: {
@@ -275,9 +275,7 @@ function parallel<
   ] as const // StateDefinition
 }
 
-type InvokeSrcExpr<TInput> =
-  | ServiceFn<TInput>
-  | Machine<any, any, TInput, any, any, any, any, any, any>
+type InvokeSrcExpr<TInput> = ServiceFn<TInput> | Machine<any, any, TInput, any, any, any, any, any, any>
 
 type InvokeConfig<
   C extends MContext,
@@ -304,56 +302,43 @@ type InvocationEvents<
 > = Array<
   | readonly [
     string,
-    NoInfer<X_DefTypeRefluxer<C, Expand<IvkDoneEBody<TSrcTypes['O']>>, I, EM, G, A, S, never>>,
+    NoInfer<X_DefTypeRefluxer<C, Expand<DoneEBody<TSrcTypes['O']>>, I, EM, G, A, S, never>>,
     X_HiddenImpl,
   ]
-  | readonly [
-    string,
-    X_DefTypeRefluxer<C, IvkErrorEBody, I, EM, G, A, S, never>,
-    X_HiddenImpl,
-  ]
+  | readonly [string, X_DefTypeRefluxer<C, ErrorEBody, I, EM, G, A, S, never>, X_HiddenImpl]
 
   // マシン対象時、EM が any であっても builtin を補完に表示させる
   // :done: と EmittedEvent を混ぜさせない
-  | (TSrcTypes['Type'] extends 'm' ?
-    IsAny<TSrcTypes['EM']> extends false ?
-    IsEqual<TSrcTypes['EM'], EmittedEvent> extends false ?
-    readonly [
-      string,
-      X_DefTypeRefluxer<C, TSrcTypes['EM'], I, EM, G, A, S, never>,
-      X_HiddenImpl,
-    ] :
-    never :
-    never :
-    never
-  )
+  | (TSrcTypes['Type'] extends 'm'
+    ? IsAny<TSrcTypes['EM']> extends false
+    ? IsEqual<TSrcTypes['EM'], EmittedEvent> extends false
+    ? readonly [string, X_DefTypeRefluxer<C, TSrcTypes['EM'], I, EM, G, A, S, never>, X_HiddenImpl]
+    : never
+    : never
+    : never)
 
   // NOTE: 現状、引数にEmittedEvent の型を指定する場合、 defServiceFn でラップしないと機能しない。
-  | (TSrcTypes['Type'] extends 'f' ?
-    IsEqual<TSrcTypes['EM'], EmittedEvent> extends false ?
-    readonly [string, X_DefTypeRefluxer<C, TSrcTypes['EM'], I, EM, G, A, S, never>, X_HiddenImpl] :
-    never :
-    never
-  )
+  | (TSrcTypes['Type'] extends 'f'
+    ? IsEqual<TSrcTypes['EM'], EmittedEvent> extends false
+    ? readonly [string, X_DefTypeRefluxer<C, TSrcTypes['EM'], I, EM, G, A, S, never>, X_HiddenImpl]
+    : never
+    : never)
 >
 
 type OO_ResolveSrc<Src, S extends ServiceRecord> = Src extends keyof S ? S[Src] : Src
 
 type O_InferIvkSrcTypes<Src, S extends ServiceRecord> =
-  OO_ResolveSrc<Src, S> extends infer T ?
-  T extends Machine<any, any, any, infer EM, infer O, any, any, any, any> ?
-  { EM: EM; O: O; Type: 'm' } :
-  T extends ServiceFn ?
-
-  (
-    Parameters<T>[1] extends EmitFn<infer EM> ?
-    IsUnknown<ReturnType<T>> extends false ?
-    { EM: NonNullable<EM>; O: Awaited<ReturnType<T>>; Type: 'f' } :
-    never :
-    { EM: EmittedEvent; O: Awaited<ReturnType<T>>; Type: 'f' }
-  ) :
-  never :
-  never
+  OO_ResolveSrc<Src, S> extends infer T
+  ? T extends Machine<any, any, any, infer EM, infer O, any, any, any, any>
+  ? { EM: EM; O: O; Type: 'm' }
+  : T extends ServiceFn
+  ? Parameters<T>[1] extends EmitFn<infer EM>
+  ? IsUnknown<ReturnType<T>> extends false
+  ? { EM: NonNullable<EM>; O: Awaited<ReturnType<T>>; Type: 'f' }
+  : never
+  : { EM: EmittedEvent; O: Awaited<ReturnType<T>>; Type: 'f' }
+  : never
+  : never
 
 // Overloads:
 function invoke<
@@ -817,7 +802,7 @@ function getDefinitionAndCatalog<
 >(
   config: MachineConfig<C, E, I, EM, O, G, A, S>,
   defineStates: (
-    define: Expand<X_DefineStatesParam>,
+    defineStatesTools: Expand<X_DefineStatesTools>,
   ) => readonly [X_GlobalEvents<C, E, I, EM, G, A>, D] | readonly [D] | D,
 ) {
   {
@@ -886,12 +871,11 @@ function getDefinitionAndCatalog<
   }
 }
 
-export function defServiceFn<
-  TFn extends (input: any, emit: EmitFn<EmittedEvent>, signal: AbortSignal) => unknown
->(fn: TFn) {
+export function defServiceFn<TFn extends (input: any, emit: EmitFn<EmittedEvent>, signal: AbortSignal) => unknown>(
+  fn: TFn,
+) {
   return fn
 }
-
 
 export function makeMachine<
   C extends MContext,
@@ -906,7 +890,7 @@ export function makeMachine<
 >(
   config: Expand<MachineConfig<C, E, I, EM, O, G, A, S>>,
   defineStates: (
-    define: Expand<X_DefineStatesParam>,
+    defineStatesTools: Expand<X_DefineStatesTools>,
   ) => readonly [X_GlobalEvents<C, E, I, EM, G, A>, D] | readonly [D] | D,
 ) {
   const { definition, topLvDefItem, stateCatalog } = getDefinitionAndCatalog<C, E, I, EM, O, S, D, G, A>(

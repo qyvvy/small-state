@@ -45,9 +45,9 @@ type X_RemovePrivateKeys<T extends Record<string, unknown>> = {
 
 export function makeRuntime<M extends AnyMachine>(
   machine: M,
-  option?: RuntimeOptions<InferMInput<M>>,
+  options?: RuntimeOptions<InferMInput<M>>,
 ) {
-  const runtime = new Runtime(machine, option)
+  const runtime = new Runtime(machine, options)
   return runtime
 }
 
@@ -239,7 +239,7 @@ export class Runtime<
       ? oldSnapshot.states
       : !crrStates.length
         ? []
-        : makeStateList(this.#crrStates, 0, '')
+        : makeStateList(this.#crrStates)
     let { context } = oldSnapshot
     const contextUpdated = newRealContext !== this.#realContext
     if (contextUpdated) {
@@ -295,7 +295,7 @@ export class Runtime<
   }
 }
 
-function makeStateList(stateRoute: StateRoute, idx: number, parent: string) {
+function makeStateList(stateRoute: StateRoute, idx: number = 0, parent: string = '') {
   if (idx >= stateRoute.length) return [parent]
   const el = stateRoute[idx]!
   if (typeof el === 'string') {

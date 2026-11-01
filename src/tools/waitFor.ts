@@ -5,7 +5,7 @@ export async function waitFor<RT extends Runtime<any>>(
   runtime: RT,
   cond: (snapshot: SnapshotFrom<RT>) => boolean,
   options?: { timeout?: number },
-) {
+): Promise<SnapshotFrom<RT>> {
   if (runtime.runtimeStatus === 'notStarted') {
     throw new Error(`RT"${runtime.id}" is not started.`)
   }
