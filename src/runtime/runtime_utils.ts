@@ -1,30 +1,30 @@
 import type {
-  BuiltinEventBody,
-  EmittedEvent,
-  EventBody,
+  AnyMachine,
+  BuiltinSendableEvent,
+  EmittableEvent,
   FnBaseParams,
   LimitedActionFnParams,
-  AnyMachine,
   MContext,
   NormalizedTransition,
   ParamsInput,
+  SendableEvent,
 } from '../machine/m.types'
 import type { AnyFn } from '../shared/general.types'
 import { isPlainObject } from '../shared/utils'
 import type { StateRoute } from './r.types'
 
-type MachineGuardFn<C extends MContext, E extends EventBody, I> = (...args: FnBaseParams<C, E, I>) => boolean
+type MachineGuardFn<C extends MContext, E extends SendableEvent, I> = (...args: FnBaseParams<C, E, I>) => boolean
 
-type MachineActionFn<C extends MContext, E extends EventBody, I, EM extends EmittedEvent> = (
+type MachineActionFn<C extends MContext, E extends SendableEvent, I, EM extends EmittableEvent> = (
   ...args: LimitedActionFnParams<C, E, I, EM>
 ) => unknown
 
 function x_resolveActionElement<
   TMachineFn extends MachineGuardFn<C, E, I> | MachineActionFn<C, E, I, EM>,
   C extends MContext,
-  E extends EventBody | BuiltinEventBody,
+  E extends SendableEvent | BuiltinSendableEvent,
   I,
-  EM extends EmittedEvent = EmittedEvent,
+  EM extends EmittableEvent = EmittableEvent,
   TTypeArg = Parameters<TMachineFn>[0],
 >(
   kind: string,
@@ -58,7 +58,7 @@ function x_resolveActionElement<
 
 export function resolveGuardElement<
   C extends MContext,
-  E extends EventBody | BuiltinEventBody,
+  E extends SendableEvent | BuiltinSendableEvent,
   I,
   TMachineFn extends MachineGuardFn<C, E, I> = MachineGuardFn<C, E, I>,
 >(
@@ -74,9 +74,9 @@ export function resolveGuardElement<
 
 export function resolveActionElement<
   C extends MContext,
-  Ex extends EventBody | BuiltinEventBody,
+  Ex extends SendableEvent | BuiltinSendableEvent,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   TTypeArg = LimitedActionFnParams<C, Ex, I, EM>[0],
   TMachineFn extends MachineActionFn<C, Ex, I, EM> = MachineActionFn<C, Ex, I, EM>,
 >(
@@ -88,7 +88,7 @@ export function resolveActionElement<
 }
 
 export const runtimeUtils = {
-  makeFnBaseParam<C extends MContext, E extends EventBody, I>(
+  makeFnBaseParam<C extends MContext, E extends SendableEvent, I>(
     context: C,
     event: E,
     input: I,
@@ -97,7 +97,7 @@ export const runtimeUtils = {
   },
 }
 
-export function readyToEvalGuard<C extends MContext, Ex extends EventBody, I>(
+export function readyToEvalGuard<C extends MContext, Ex extends SendableEvent, I>(
   fnBaseParam: FnBaseParams<C, Ex, I>[0],
   machineGuards: AnyMachine['internal']['guards'],
 ) {

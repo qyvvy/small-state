@@ -10,42 +10,42 @@ export const InvokeSymbol: unique symbol = Symbol('Invoke')
 
 export type ChildDoneEBody = { type: ':childDone:', output: unknown }
 export type BuiltinEType = ':always:' | ChildDoneEBody['type']
-export type BuiltinEventBody = { type: BuiltinEType;[key: string]: any }
+export type BuiltinSendableEvent = { type: BuiltinEType;[key: string]: any }
 export type DoneEBody<O> = { type: ':done:', output: O }
 export type ErrorEBody = { type: ':error:', error: unknown }
 
 export const SystemEventSymbol: unique symbol = Symbol('SystemEvent')
-export type SystemEventBody =
+export type SystemSendableEvent =
   | {
     type: `invoke/${string}[${number}]`
     [SystemEventSymbol]: true
     payload: { type: string;[key: string]: any }
   }
   | { type: `system/${string}` }
-export type InternalEType = BuiltinEType | SystemEventBody['type']
+export type InternalEType = BuiltinEType | SystemSendableEvent['type']
 export type InternalEPayload = { path: string } | EmptyRecord
 
 export type MContext = Record<string, any>
-export type EventBody = { type: string;[key: string]: any }
-export type EmittedEvent = { type: string;[key: string]: any }
+export type SendableEvent = { type: string;[key: string]: any }
+export type EmittableEvent = { type: string;[key: string]: any }
 export type StateName = string
 
-export type InferEventBody<M extends AnyMachine> =
+export type InferSendableEvent<M extends AnyMachine> =
   M extends Machine<any, infer E, any, any, any, any, any, any, any> ? E : never
 
-// type 以外のプロパティを持たない EventBody の型を抽出する
-export type PureETypeString<E extends EventBody> =
+// type 以外のプロパティを持たない SendableEvent の型を抽出する
+export type PureETypeString<E extends SendableEvent> =
   E extends unknown ? Exclude<keyof E, "type"> extends never ? E['type'] : never : any
 
-export type FnBaseParams<C extends MContext, Ex extends EventBody, I, Additional = unknown, Prm = any> = [
+export type FnBaseParams<C extends MContext, Ex extends SendableEvent, I, Additional = unknown, Prm = any> = [
   arg: Expand<{ c: C; context: C; e: Ex; event: Ex; input: I } & Additional>,
   params: Prm
 ]
 export type ActionFnParams<
   C extends MContext,
-  Ex extends EventBody,
+  Ex extends SendableEvent,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends ServiceRecord
@@ -60,9 +60,9 @@ export type ActionFnParams<
 >
 export type LimitedActionFnParams<
   C extends MContext,
-  E extends EventBody,
+  E extends SendableEvent,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   Prm = any
 > = FnBaseParams<C, E, I, {
   update: UpdateFn<C>,
@@ -70,7 +70,7 @@ export type LimitedActionFnParams<
 }, Prm>
 
 export type CheckFn<
-  C extends MContext, Ex extends EventBody, I, G extends Record<string, Placeholder>
+  C extends MContext, Ex extends SendableEvent, I, G extends Record<string, Placeholder>
 > = {
   (type: Values<{ [K in keyof G & string as unknown extends G[K] ? never : K]: { [K3 in K]: ParamsInput<G[K], C, Ex, I> } }>): boolean
   <Gk extends keyof G & string | never>(
@@ -84,7 +84,7 @@ export type CheckFn<
  * enqueue(fn: (arg: FnBaseParams & {update: UpdateFn, emit: EmitFn}) => void): void
  */
 export type EnqueueFn<
-  C extends MContext, Ex extends EventBody, I, EM extends EmittedEvent, A extends Record<string, Placeholder>
+  C extends MContext, Ex extends SendableEvent, I, EM extends EmittableEvent, A extends Record<string, Placeholder>
 > = {
   (type: Values<{ [K in keyof A & string as unknown extends A[K] ? never : K]: { [K2 in K]: ParamsInput<A[K], C, Ex, I> } }>): void
   <Ak extends keyof A & string | never>(type: Ak, ...args: ParamsInputArgsOf<A, Ak, C, Ex, I>): void
@@ -109,18 +109,18 @@ export type SendToFn<
 > =
   <Sk extends keyof Sm | `${keyof Sm & string}:${string}`>(
     target: Sk,
-    event: InferEventBody<Sm[O_RemoveAfterColon<Sk> extends infer T extends keyof Sm ? T : never]>
+    event: InferSendableEvent<Sm[O_RemoveAfterColon<Sk> extends infer T extends keyof Sm ? T : never]>
   ) => void
 
 
-export type EmitFn<EM extends EmittedEvent> = (emittedEvent: EM) => unknown
+export type EmitFn<EM extends EmittableEvent> = (event: EM) => unknown
 
 
 
-type X_NormalizedGuard<C extends MContext = any, Ex extends EventBody = any, I = any> =
+type X_NormalizedGuard<C extends MContext = any, Ex extends SendableEvent = any, I = any> =
   ((arg: FnBaseParams<C, Ex, I>[0]) => boolean) | string | Record<string, ParamsInput<unknown, C, Ex, I>>
 export type NormalizedAction<
-  C extends MContext = any, Ex extends EventBody = any, I = any, EM extends EmittedEvent = any,
+  C extends MContext = any, Ex extends SendableEvent = any, I = any, EM extends EmittableEvent = any,
   G extends Record<string, Placeholder> = any,
   A extends Record<string, Placeholder> = any,
   S extends ServiceRecord = ServiceRecord
@@ -142,7 +142,7 @@ export type NormalizedInvocation = {
   mainKey: string
   subKey?: string | number
   input?: AnyFn
-  emittedETypesToListen: string[]
+  emittableETypesToListen: string[]
   src: NormalizedSrc
 }
 
@@ -183,14 +183,14 @@ export type ParallelNormalizedDefinition = {
   stateOf: Record<string, ParallelNormalizedStateItem>
 }
 
-export type ParamsInput<Prm, C extends MContext, Ex extends EventBody, I> =
+export type ParamsInput<Prm, C extends MContext, Ex extends SendableEvent, I> =
   Prm | ((arg: FnBaseParams<C, Ex, I>[0]) => Prm)
 
 export type ParamsInputArgsOf<
   IR extends Record<string, Placeholder>,
   IRk extends keyof IR,
   C extends MContext,
-  Ex extends EventBody,
+  Ex extends SendableEvent,
   I,
 > = unknown extends IR[IRk]
   ? []
@@ -199,23 +199,23 @@ export type ParamsInputArgsOf<
 
 export type ServiceFn<
   TInput = any,
-  TEmitted extends EmittedEvent = EmittedEvent,
+  TEmittable extends EmittableEvent = EmittableEvent,
 > =
-  (input: TInput, emit: EmitFn<TEmitted>, signal: AbortSignal) => unknown
+  (input: TInput, emit: EmitFn<TEmittable>, signal: AbortSignal) => unknown
 
 export type ServiceRecord = Record<string, ServiceFn | AnyMachine>
 
 export type MachineConfig<
   C extends MContext,
-  E extends EventBody,
+  E extends SendableEvent,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   O,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends ServiceRecord,
 > = {
-  types?: { context?: C; events?: E; emitted?: EM; input?: I; output?: O }
+  types?: { context?: C; events?: E; emittable?: EM; input?: I; output?: O }
   name?: string
   initialState?: StateName
   initContext?: (input: I) => LowInfer<C>
@@ -234,9 +234,9 @@ export type AnyMachine = Machine<any, any, any, any, any, any, any, any, any>
 export const MachineSymbol: unique symbol = Symbol('Machine')
 export type Machine<
   C extends MContext,
-  E extends EventBody,
+  E extends SendableEvent,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   O,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
@@ -248,9 +248,9 @@ export type Machine<
     [MachineSymbol]: true
     initContext: undefined | ((input: I) => C)
     output: undefined | ((arg: FnBaseParams<C, DoneEBody<unknown>, I, unknown>[0]) => O)
-    guards: { [K in keyof G]: (arg: FnBaseParams<C, E | BuiltinEventBody, I>[0], params: G[K]) => boolean }
+    guards: { [K in keyof G]: (arg: FnBaseParams<C, E | BuiltinSendableEvent, I>[0], params: G[K]) => boolean }
     actions: {
-      [K in keyof A]: (arg: LimitedActionFnParams<C, E | BuiltinEventBody, I, EM>[0], params: A[K]) => unknown
+      [K in keyof A]: (arg: LimitedActionFnParams<C, E | BuiltinSendableEvent, I, EM>[0], params: A[K]) => unknown
     }
     services: S
     definition: ND
@@ -263,9 +263,9 @@ export type Machine<
     const nA extends Record<string, Placeholder> = Record<string, Placeholder>,
   >(
     implementations: {
-      guards?: { [K in keyof nG]: (arg: FnBaseParams<C, E | BuiltinEventBody, I>[0], params: nG[K]) => boolean },
+      guards?: { [K in keyof nG]: (arg: FnBaseParams<C, E | BuiltinSendableEvent, I>[0], params: nG[K]) => boolean },
       actions?: {
-        [K in keyof nA]: (arg: LimitedActionFnParams<C, E | BuiltinEventBody, I, EM>[0], params: nA[K]) => unknown
+        [K in keyof nA]: (arg: LimitedActionFnParams<C, E | BuiltinSendableEvent, I, EM>[0], params: nA[K]) => unknown
       }
       services?: nS
     }

@@ -8,7 +8,7 @@ describe('rt_main_emit', () => {
     name: 'counter',
     types: {
       events: {} as { type: 'inc' } | { type: 'reset' },
-      emitted: {} as
+      emittable: {} as
         | { type: 'incremented', count: number }
         | { type: 'limitReached' }
     },

@@ -6,7 +6,7 @@ const o_Types = type({
   '+': 'reject',
   'context?': 'unknown',
   'events?': 'unknown',
-  'emitted?': 'unknown',
+  'emittable?': 'unknown',
   'input?': 'unknown',
   'output?': 'unknown',
 })

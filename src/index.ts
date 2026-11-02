@@ -2,9 +2,9 @@ export type {
   AnyMachine,
   BuiltinEType,
   EmitFn as Emit,
-  EmittedEvent,
-  EventBody,
+  EmittableEvent,
   MContext,
+  SendableEvent,
   ServiceFn,
 } from './machine/m.types'
 export { defServiceFn, makeMachine } from './machine/machine'

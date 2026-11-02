@@ -1,16 +1,16 @@
 import type {
-  BuiltinEventBody,
+  BuiltinSendableEvent,
   DoneEBody,
-  EmittedEvent,
-  EventBody,
+  EmittableEvent,
   FnBaseParams,
   InternalEPayload,
   Machine,
   MContext,
   NormalizedAction,
   NormalizedDefinition,
+  SendableEvent,
   ServiceRecord,
-  SystemEventBody,
+  SystemSendableEvent,
 } from '../machine/m.types'
 import { MICROSTEP_LOOP_LIMIT, ST_DELIM } from '../shared/constants'
 import type { Placeholder } from '../shared/general.types'
@@ -28,7 +28,7 @@ import {
   updateStateRouteForEntry,
 } from './runtime_step.core'
 
-function execTExecActions<Eo extends EventBody>(
+function execTExecActions<Eo extends SendableEvent>(
   tExecs: TransitionExec[],
   actionRunner: ReturnType<typeof readyAction<any, any, any, any, any, any, any, any>>,
   errLocation: string,
@@ -57,9 +57,9 @@ function execTExecActions<Eo extends EventBody>(
 
 export function initRuntime<
   C extends MContext,
-  E extends EventBody,
+  E extends SendableEvent,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends ServiceRecord,
@@ -93,10 +93,10 @@ export function initRuntime<
 
 export function macrostep<
   C extends MContext,
-  E extends EventBody,
-  Ex extends E | BuiltinEventBody | SystemEventBody,
+  E extends SendableEvent,
+  Ex extends E | BuiltinSendableEvent | SystemSendableEvent,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends ServiceRecord,
@@ -133,10 +133,10 @@ export function macrostep<
 
 function runMicrosteps<
   C extends MContext,
-  E extends EventBody,
-  Ex extends E | BuiltinEventBody | SystemEventBody,
+  E extends SendableEvent,
+  Ex extends E | BuiltinSendableEvent | SystemSendableEvent,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends ServiceRecord,
@@ -148,7 +148,7 @@ function runMicrosteps<
   machineInternal: Machine<C, E, I, EM, any, G, A, any, ND>['internal'],
   rtOutbound: RuntimeOutbound<E, EM, S>,
 ) {
-  const internalQueue: Array<[EventBody, InternalEPayload]> = []
+  const internalQueue: Array<[SendableEvent, InternalEPayload]> = []
 
   let [hasTransitioned, doneEvent] = runExitAndEntryThenAlways(
     tExecs,
@@ -185,10 +185,10 @@ function runMicrosteps<
 
 function runExitAndEntryThenAlways<
   C extends MContext,
-  E extends EventBody,
-  Ex extends E | BuiltinEventBody | SystemEventBody,
+  E extends SendableEvent,
+  Ex extends E | BuiltinSendableEvent | SystemSendableEvent,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends ServiceRecord,
@@ -199,7 +199,7 @@ function runExitAndEntryThenAlways<
   actionRunner: ReturnType<typeof readyAction<C, E, I, EM, G, A, S, Ex>>,
   machineInternal: Machine<C, E, I, EM, any, G, A, any, ND>['internal'],
   rtOutbound: RuntimeOutbound<E, EM, S>,
-  internalQueue: Array<[EventBody, InternalEPayload]>,
+  internalQueue: Array<[SendableEvent, InternalEPayload]>,
 ) {
   let [alwaysTExecs, hasTransitioned, doneEvent] = exitAndEntry(
     tExecs,
@@ -231,10 +231,10 @@ function runExitAndEntryThenAlways<
 
 function exitAndEntry<
   C extends MContext,
-  E extends EventBody,
-  Ex extends E | BuiltinEventBody | SystemEventBody,
+  E extends SendableEvent,
+  Ex extends E | BuiltinSendableEvent | SystemSendableEvent,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends ServiceRecord,
@@ -245,7 +245,7 @@ function exitAndEntry<
   actionRunner: ReturnType<typeof readyAction<C, E, I, EM, G, A, S, Ex>>,
   { guards, services, stateCatalog, definition }: Machine<C, E, I, EM, any, G, A, any, ND>['internal'],
   rtOutbound: RuntimeOutbound<E, EM, S>,
-  internalQueue: Array<[EventBody, InternalEPayload]>,
+  internalQueue: Array<[SendableEvent, InternalEPayload]>,
 ): [TransitionExec[], hasTransitioned: boolean, doneEvent: DoneEBody<unknown> | undefined] {
   let doneEvent: DoneEBody<unknown> | undefined
   const { makeFnBaseParam, execAction, processQueue } = actionRunner

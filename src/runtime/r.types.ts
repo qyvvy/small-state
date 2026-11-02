@@ -1,20 +1,19 @@
 import type {
-  BuiltinEventBody,
-  EmittedEvent,
-  EventBody,
+  AnyMachine,
+  BuiltinSendableEvent,
+  EmittableEvent,
   InternalEPayload,
   Machine,
-  AnyMachine,
+  SendableEvent,
   ServiceRecord,
-  SystemEventBody,
+  SystemSendableEvent,
 } from '../machine/m.types'
 import type { AnyFn, IsAny } from '../shared/general.types'
 import type { Runtime, Snapshot } from './Runtime'
 
 export type StateRoute = Array<string | { parallel: string; regions: { [key: string]: StateRoute }; output?: unknown }>
 
-type Child<TService> =
-  TService extends AnyMachine
+type Child<TService> = TService extends AnyMachine
   ? Runtime<TService>
   : TService extends AnyFn
   ? { stop: () => void }
@@ -22,10 +21,10 @@ type Child<TService> =
 export type Children<S extends ServiceRecord> = {
   [K in keyof S & string as K | `${K}:${string | number}`]?: Child<S[K]>
 } & { [key: string]: Child<any> }
-export type RuntimeOutbound<E extends EventBody, EM extends EmittedEvent, S extends ServiceRecord> = {
+export type RuntimeOutbound<E extends SendableEvent, EM extends EmittableEvent, S extends ServiceRecord> = {
   id: string
-  enqueueEvent: (event: E | BuiltinEventBody | SystemEventBody, payload?: InternalEPayload) => void
-  emit: (emittedEvent: EM) => void
+  enqueueEvent: (event: E | BuiltinSendableEvent | SystemSendableEvent, payload?: InternalEPayload) => void
+  emit: (eventToEmit: EM) => void
   children: Children<S>
 }
 

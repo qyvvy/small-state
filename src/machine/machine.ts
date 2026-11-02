@@ -18,13 +18,12 @@ import * as ark_stdef from './arktype/ark_stdef'
 import type {
   ActionFnParams,
   BuiltinEType,
-  BuiltinEventBody,
+  BuiltinSendableEvent,
   ChildDoneEBody,
   DoneEBody,
   EmitFn,
-  EmittedEvent,
+  EmittableEvent,
   ErrorEBody,
-  EventBody,
   FnBaseParams,
   InternalEPayload,
   LimitedActionFnParams,
@@ -38,6 +37,7 @@ import type {
   NStateItemDef,
   ParallelNormalizedDefinition,
   ParamsInput,
+  SendableEvent,
   ServiceFn,
   ServiceRecord,
   StateName,
@@ -48,9 +48,9 @@ import { EntrySymbol, ExitSymbol, InvokeSymbol, MachineSymbol, ParallelSymbol, S
 type X_HiddenImpl = any & { __brand: 'HiddenImpl' }
 type X_DefTypeRefluxer<
   C extends MContext,
-  E extends EventBody,
+  E extends SendableEvent,
   I, // Input
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends ServiceRecord = ServiceRecord,
@@ -91,16 +91,16 @@ type X_ImplKeys<IpR extends Record<string, Placeholder>> = Values<{
   [K in keyof IpR]: unknown extends IpR[K] ? K : never
 }>
 
-type Guard<C extends MContext, Ex extends EventBody, I, G extends Record<string, Placeholder>> =
+type Guard<C extends MContext, Ex extends SendableEvent, I, G extends Record<string, Placeholder>> =
   | Expand<X_ImplKeys<G>>
   | Values<{ [K in keyof G & string as unknown extends G[K] ? never : K]: { [K2 in K]: ParamsInput<G[K], C, Ex, I> } }> // { [guardName: string]: Params }
   | ((arg: FnBaseParams<C, Ex, I>[0]) => boolean)
 
 type Action<
   C extends MContext,
-  Ex extends EventBody,
+  Ex extends SendableEvent,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends ServiceRecord,
@@ -109,15 +109,15 @@ type Action<
   | Values<{ [K in keyof A & string as unknown extends A[K] ? never : K]: { [K2 in K]: ParamsInput<A[K], C, Ex, I> } }> // { [actionName: string]: Params }
   | ((arg: ActionFnParams<C, Ex, I, EM, G, A, S>[0]) => unknown)
 
-type StDefMetaInfo<C extends MContext, E extends EventBody, I> = {
+type StDefMetaInfo<C extends MContext, E extends SendableEvent, I> = {
   final?: boolean | ((args: FnBaseParams<C, E, I>[0]) => unknown)
 }
 
 type StDefCoreItem<
   C extends MContext,
-  E extends EventBody,
+  E extends SendableEvent,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends ServiceRecord,
@@ -129,9 +129,9 @@ type StDefCoreItem<
 
 type StateDefinition<
   C extends MContext,
-  E extends EventBody,
+  E extends SendableEvent,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends ServiceRecord,
@@ -143,9 +143,9 @@ type StateDefinition<
 
 function entryHook<
   C extends MContext,
-  E extends EventBody,
+  E extends SendableEvent,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   const G extends Record<string, Placeholder>,
   const A extends Record<string, Placeholder>,
   S extends ServiceRecord,
@@ -155,9 +155,9 @@ function entryHook<
 
 function exitHook<
   C extends MContext,
-  E extends EventBody,
+  E extends SendableEvent,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   const G extends Record<string, Placeholder>,
   const A extends Record<string, Placeholder>,
   S extends ServiceRecord,
@@ -165,7 +165,7 @@ function exitHook<
   return [ExitSymbol, (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A, S>, null, actions] as const // StDefItems
 }
 
-type O_ExtractEvent<E extends EventBody, Et extends E['type']> = Et extends ChildDoneEBody['type']
+type O_ExtractEvent<E extends SendableEvent, Et extends E['type']> = Et extends ChildDoneEBody['type']
   ? Expand<ChildDoneEBody>
   : Et extends BuiltinEType
   ? E
@@ -177,9 +177,9 @@ type O_ExtractEvent<E extends EventBody, Et extends E['type']> = Et extends Chil
 
 type O_Transition<
   C extends MContext,
-  Ex extends EventBody,
+  Ex extends SendableEvent,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends ServiceRecord,
@@ -191,9 +191,9 @@ type O_Transition<
 
 function on<
   C extends MContext,
-  E extends EventBody,
+  E extends SendableEvent,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   const G extends Record<string, Placeholder>,
   const A extends Record<string, Placeholder>,
   S extends ServiceRecord,
@@ -205,9 +205,9 @@ function on<
 
 function subStates<
   C extends MContext,
-  E extends EventBody,
+  E extends SendableEvent,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   const G extends Record<string, Placeholder>,
   const A extends Record<string, Placeholder>,
   S extends ServiceRecord,
@@ -239,9 +239,9 @@ type O_InnerDict<T> = T extends [...any[], infer Last] ? Last : never
 
 function parallel<
   C extends MContext,
-  E extends EventBody,
+  E extends SendableEvent,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends ServiceRecord,
@@ -279,7 +279,7 @@ type InvokeSrcExpr<TInput> = ServiceFn<TInput> | Machine<any, any, TInput, any, 
 
 type InvokeConfig<
   C extends MContext,
-  E extends EventBody,
+  E extends SendableEvent,
   I,
   S extends ServiceRecord,
   Src extends keyof S | InvokeSrcExpr<[SrcInput] extends [never] ? any : SrcInput>,
@@ -294,11 +294,11 @@ type InvokeConfig<
 type InvocationEvents<
   C extends MContext,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends ServiceRecord,
-  TSrcTypes extends { Type: 'm' | 'f'; EM: EmittedEvent; O: unknown },
+  TSrcTypes extends { Type: 'm' | 'f'; EM: EmittableEvent; O: unknown },
 > = Array<
   | readonly [
     string,
@@ -308,18 +308,18 @@ type InvocationEvents<
   | readonly [string, X_DefTypeRefluxer<C, ErrorEBody, I, EM, G, A, S, never>, X_HiddenImpl]
 
   // マシン対象時、EM が any であっても builtin を補完に表示させる
-  // :done: と EmittedEvent を混ぜさせない
+  // :done: と EmittableEvent を混ぜさせない
   | (TSrcTypes['Type'] extends 'm'
     ? IsAny<TSrcTypes['EM']> extends false
-    ? IsEqual<TSrcTypes['EM'], EmittedEvent> extends false
+    ? IsEqual<TSrcTypes['EM'], EmittableEvent> extends false
     ? readonly [string, X_DefTypeRefluxer<C, TSrcTypes['EM'], I, EM, G, A, S, never>, X_HiddenImpl]
     : never
     : never
     : never)
 
-  // NOTE: 現状、引数にEmittedEvent の型を指定する場合、 defServiceFn でラップしないと機能しない。
+  // NOTE: 現状、引数にEmittableEvent の型を指定する場合、 defServiceFn でラップしないと機能しない。
   | (TSrcTypes['Type'] extends 'f'
-    ? IsEqual<TSrcTypes['EM'], EmittedEvent> extends false
+    ? IsEqual<TSrcTypes['EM'], EmittableEvent> extends false
     ? readonly [string, X_DefTypeRefluxer<C, TSrcTypes['EM'], I, EM, G, A, S, never>, X_HiddenImpl]
     : never
     : never)
@@ -336,16 +336,16 @@ type O_InferIvkSrcTypes<Src, S extends ServiceRecord> =
   ? IsUnknown<ReturnType<T>> extends false
   ? { EM: NonNullable<EM>; O: Awaited<ReturnType<T>>; Type: 'f' }
   : never
-  : { EM: EmittedEvent; O: Awaited<ReturnType<T>>; Type: 'f' }
+  : { EM: EmittableEvent; O: Awaited<ReturnType<T>>; Type: 'f' }
   : never
   : never
 
 // Overloads:
 function invoke<
   C extends MContext,
-  E extends EventBody,
+  E extends SendableEvent,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   const G extends Record<string, Placeholder>,
   const A extends Record<string, Placeholder>,
   S extends ServiceRecord,
@@ -365,9 +365,9 @@ function invoke<
 
 function invoke<
   C extends MContext,
-  E extends EventBody,
+  E extends SendableEvent,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   const G extends Record<string, Placeholder>,
   const A extends Record<string, Placeholder>,
   S extends ServiceRecord,
@@ -389,9 +389,9 @@ function invoke<
 // Implementation:
 function invoke<
   C extends MContext,
-  E extends EventBody,
+  E extends SendableEvent,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   const G extends Record<string, Placeholder>,
   const A extends Record<string, Placeholder>,
   S extends ServiceRecord,
@@ -517,8 +517,8 @@ function x_parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateN
               }
             })()
             const { invocations, internalEvents } = def
-            const emittedETypesToListen: string[] = []
-            invocations.push({ ...item[4], src, emittedETypesToListen, mainKey: '' })
+            const emittableETypesToListen: string[] = []
+            invocations.push({ ...item[4], src, emittableETypesToListen, mainKey: '' })
 
             for (const [j, [ivkEType, _, ivkTransitions]] of item[5].entries()) {
               const transitions = ensureArray(ivkTransitions!)
@@ -538,7 +538,7 @@ function x_parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateN
                 transitions: o_normalizeTransitions(transitions),
               }
               if (!(ivkEType === ':done:' || ivkEType === ':error:')) {
-                emittedETypesToListen.push(ivkEType)
+                emittableETypesToListen.push(ivkEType)
               }
             }
             break
@@ -634,9 +634,9 @@ function transformNormalizedDefinition<
 
 function transformParallelNormalizedDefinition<
   C extends MContext,
-  E extends EventBody,
+  E extends SendableEvent,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends ServiceRecord,
@@ -782,18 +782,18 @@ function o_validateTransitionAndSetFullTo(stateCatalog: Map<string, NormalizedSt
 
 type X_GlobalEvents<
   C extends MContext,
-  E extends EventBody,
+  E extends SendableEvent,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
 > = Array<readonly [E['type'] | BuiltinEType, X_DefTypeRefluxer<C, E, I, EM, G, A>, X_HiddenImpl]>
 
 function getDefinitionAndCatalog<
   C extends MContext,
-  const E extends EventBody,
+  const E extends SendableEvent,
   const I,
-  const EM extends EmittedEvent,
+  const EM extends EmittableEvent,
   const O,
   const S extends ServiceRecord,
   const D extends { [K in string]: StateDefinition<C, E, I, EM, G, A, S> },
@@ -871,7 +871,7 @@ function getDefinitionAndCatalog<
   }
 }
 
-export function defServiceFn<TFn extends (input: any, emit: EmitFn<EmittedEvent>, signal: AbortSignal) => unknown>(
+export function defServiceFn<TFn extends (input: any, emit: EmitFn<EmittableEvent>, signal: AbortSignal) => unknown>(
   fn: TFn,
 ) {
   return fn
@@ -879,9 +879,9 @@ export function defServiceFn<TFn extends (input: any, emit: EmitFn<EmittedEvent>
 
 export function makeMachine<
   C extends MContext,
-  const E extends EventBody,
+  const E extends SendableEvent,
   const I,
-  const EM extends EmittedEvent,
+  const EM extends EmittableEvent,
   const O,
   const S extends ServiceRecord,
   const D extends { [K in string]: StateDefinition<C, E, I, EM, G, A, S> },
@@ -920,9 +920,9 @@ export function makeMachine<
 
 function provide<
   C extends MContext,
-  const E extends EventBody,
+  const E extends SendableEvent,
   const I,
-  const EM extends EmittedEvent,
+  const EM extends EmittableEvent,
   O,
   const G extends Record<string, Placeholder>,
   const A extends Record<string, Placeholder>,
@@ -934,9 +934,9 @@ function provide<
 >(
   this: Machine<C, E, I, EM, any, G, A, S, ND>,
   implementations: {
-    guards?: { [K in keyof nG]: (arg: FnBaseParams<C, E | BuiltinEventBody, I>[0], params: nG[K]) => boolean }
+    guards?: { [K in keyof nG]: (arg: FnBaseParams<C, E | BuiltinSendableEvent, I>[0], params: nG[K]) => boolean }
     actions?: {
-      [K in keyof nA]: (arg: LimitedActionFnParams<C, E | BuiltinEventBody, I, EM>[0], params: nA[K]) => unknown
+      [K in keyof nA]: (arg: LimitedActionFnParams<C, E | BuiltinSendableEvent, I, EM>[0], params: nA[K]) => unknown
     }
     services?: nS
   },

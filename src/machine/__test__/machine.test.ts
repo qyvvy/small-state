@@ -1372,7 +1372,7 @@ describe('machine', () => {
             increment: async (count: number) => count + 1,
             log: async (msg: string) => console.log(msg),
             subMachine: makeMachine({
-              types: { emitted: {} as { type: 'EMITTED1' } | { type: 'EMITTED2' } }
+              types: { emittable: {} as { type: 'EMITTABLE1' } | { type: 'EMITTABLE2' } }
             }, () => ({ foo: [] }))
           },
         },
@@ -1424,8 +1424,8 @@ describe('machine', () => {
                 ),
                 invoke(
                   'subMachine',
-                  on('EMITTED1', { actions: () => { } }),
-                  on('EMITTED2', { actions: () => { } }),
+                  on('EMITTABLE1', { actions: () => { } }),
+                  on('EMITTABLE2', { actions: () => { } }),
                 )
               ],
               subState2: null,
@@ -1456,13 +1456,13 @@ describe('machine', () => {
                 {
                   mainKey: 'increment',
                   input: expect.any(Function),
-                  emittedETypesToListen: [],
+                  emittableETypesToListen: [],
                   src: { type: 'string', value: 'increment' },
                 },
                 {
                   mainKey: '/state1[1]',
                   input: expect.any(Function),
-                  emittedETypesToListen: [],
+                  emittableETypesToListen: [],
                   src: { type: 'function', value: expect.any(Function) },
                 },
               ],
@@ -1510,14 +1510,14 @@ describe('machine', () => {
                         mainKey: 'increment',
                         subKey: 'state2-invocation',
                         input: expect.any(Function),
-                        emittedETypesToListen: [],
+                        emittableETypesToListen: [],
                         src: { type: 'string', value: 'increment' },
                       },
                       {
                         mainKey: 'subMachine',
-                        emittedETypesToListen: [
-                          'EMITTED1',
-                          'EMITTED2',
+                        emittableETypesToListen: [
+                          'EMITTABLE1',
+                          'EMITTABLE2',
                         ],
                         src: { type: 'string', value: 'subMachine' },
                       }
@@ -1533,11 +1533,11 @@ describe('machine', () => {
                         cond: expect.any(Function),
                         transitions: [{ actions: [expect.any(Function)], guards: [] }],
                       },
-                      'invoke/EMITTED1[1]': {
+                      'invoke/EMITTABLE1[1]': {
                         cond: expect.any(Function),
                         transitions: [{ actions: [expect.any(Function)], guards: [] }],
                       },
-                      'invoke/EMITTED2[1]': {
+                      'invoke/EMITTABLE2[1]': {
                         cond: expect.any(Function),
                         transitions: [{ actions: [expect.any(Function)], guards: [] }],
                       }

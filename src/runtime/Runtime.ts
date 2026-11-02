@@ -1,12 +1,12 @@
 import type {
   AnyMachine,
-  BuiltinEventBody,
+  BuiltinSendableEvent,
   DoneEBody,
   InternalEPayload,
   MContext,
   PureETypeString,
   ServiceRecord,
-  SystemEventBody,
+  SystemSendableEvent,
 } from '../machine/m.types'
 import { ST_DELIM } from '../shared/constants'
 import type { Expand } from '../shared/general.types'
@@ -74,7 +74,7 @@ export class Runtime<
   readonly #input!: I<Mt>
   #realContext!: C<Mt>
   #crrStates: StateRoute = []
-  #sentQueue: MailBox<E<Mt> | BuiltinEventBody, InternalEPayload> = new MailBox(this.#processSentEvent.bind(this))
+  #sentQueue: MailBox<E<Mt> | BuiltinSendableEvent, InternalEPayload> = new MailBox(this.#processSentEvent.bind(this))
   #enqueueEvent = this.#sentQueue.enqueue.bind(this.#sentQueue)
   #outbound: RuntimeOutbound<E<Mt>, EM<Mt>, S<Mt>> = {
     id: '',
@@ -175,7 +175,7 @@ export class Runtime<
     }
   }
 
-  #processSentEvent<Ex extends E<Mt> | BuiltinEventBody | SystemEventBody>(event: Ex, internalEPayload?: InternalEPayload) {
+  #processSentEvent<Ex extends E<Mt> | BuiltinSendableEvent | SystemSendableEvent>(event: Ex, internalEPayload?: InternalEPayload) {
     if (event === STOP_EVENT) {
       return this.#stop()
     }

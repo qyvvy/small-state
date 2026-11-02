@@ -615,7 +615,8 @@ describe('rt_main_invoke', () => {
       const child = makeMachine(
         {
           types: {
-            events: {} as { type: 'ping'; v: number },
+            events: {} as { type: 'ping'; v: number } | { type: 'emit'; v: number },
+            emittable: {} as { type: 'emitted', emittedV: number },
             context: {} as { v?: number },
             output: {} as number,
           },
@@ -657,7 +658,7 @@ describe('rt_main_invoke', () => {
     test('0:子から親へのemit', async () => {
       const child = makeMachine(
         {
-          types: { emitted: {} as { type: 'childEvent'; value: string } },
+          types: { emittable: {} as { type: 'childEvent'; value: string } },
         },
         ({ entryHook }) => ({
           first: [entryHook(({ emit }) => emit({ type: 'childEvent', value: 'hello' }))],

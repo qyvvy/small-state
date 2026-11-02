@@ -1,13 +1,12 @@
 import type {
   ActionFnParams,
   AnyMachine,
-  BuiltinEventBody,
+  BuiltinSendableEvent,
   CheckFn,
-  EmittedEvent,
+  EmittableEvent,
   EnqueueFn,
-  EventBody,
   FnBaseParams,
-  InferEventBody,
+  InferSendableEvent,
   InternalEPayload,
   InternalEType,
   LimitedActionFnParams,
@@ -23,10 +22,11 @@ import type {
   ParallelNormalizedStateItem,
   ParamsInput,
   ParamsInputArgsOf,
+  SendableEvent,
   SendToFn,
   ServiceFn,
   ServiceRecord,
-  SystemEventBody,
+  SystemSendableEvent,
   TopLvStDefItem,
   UpdateFn,
   UpdateFnParam,
@@ -254,11 +254,13 @@ function x_findDeepestTransitions(
 
 // ==
 
-function o_unwrapSystemEvent(event: EventBody | BuiltinEventBody | SystemEventBody): EventBody | BuiltinEventBody {
+function o_unwrapSystemEvent(
+  event: SendableEvent | BuiltinSendableEvent | SystemSendableEvent,
+): SendableEvent | BuiltinSendableEvent {
   return !(SystemEventSymbol in event && event.payload) ? event : event.payload
 }
 
-function o_evalActionParams<C extends MContext, Ex extends EventBody, I>(
+function o_evalActionParams<C extends MContext, Ex extends SendableEvent, I>(
   param: unknown | ((arg: FnBaseParams<C, Ex, I>[0]) => unknown),
   context: C,
   event: Ex,
@@ -269,14 +271,14 @@ function o_evalActionParams<C extends MContext, Ex extends EventBody, I>(
 
 export function readyAction<
   C extends MContext,
-  E extends EventBody,
+  E extends SendableEvent,
   I,
-  EM extends EmittedEvent,
+  EM extends EmittableEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends ServiceRecord,
-  Exr extends E | BuiltinEventBody | SystemEventBody,
-  Ex extends E | BuiltinEventBody = Exclude<Exr, SystemEventBody>,
+  Exr extends E | BuiltinSendableEvent | SystemSendableEvent,
+  Ex extends E | BuiltinSendableEvent = Exclude<Exr, SystemSendableEvent>,
 >(
   origContext: C,
   rawEvent: Exr,
@@ -332,7 +334,7 @@ export function readyAction<
     return fn(fnBaseParam, typeof params !== 'function' ? params : params(fnBaseParam))
   }
 
-  function sendTo(target: string, event: InferEventBody<AnyMachine>) {
+  function sendTo(target: string, event: InferSendableEvent<AnyMachine>) {
     if (!Object.hasOwn(rtOutbound.children, target)) {
       throw new Error(`Cannot send event to "${target}": child not found.`)
     }
@@ -372,7 +374,7 @@ export function readyAction<
       return saveFnBaseParam
     },
 
-    execAction<Exx extends Eo extends undefined ? Ex : any, Eo extends EventBody | undefined = undefined>(
+    execAction<Exx extends Eo extends undefined ? Ex : any, Eo extends SendableEvent | undefined = undefined>(
       transitionAction: NormalizedAction<C, Ex, I, EM, G, A, S>,
       eventOverride?: Eo,
     ) {
@@ -427,7 +429,7 @@ export function readyAction<
   }
 }
 
-function o_readyToFindInternalEventTransition<C extends MContext, Ex extends EventBody, I>(
+function o_readyToFindInternalEventTransition<C extends MContext, Ex extends SendableEvent, I>(
   fnBaseParam: FnBaseParams<C, Ex, I>[0],
   machineGuards: AnyMachine['internal']['guards'],
   internalEPayload: InternalEPayload,
@@ -450,7 +452,7 @@ function o_readyToFindInternalEventTransition<C extends MContext, Ex extends Eve
   }
 }
 
-function o_readyToFindTransitionByEvent<C extends MContext, Ex extends EventBody, I>(
+function o_readyToFindTransitionByEvent<C extends MContext, Ex extends SendableEvent, I>(
   fnBaseParam: FnBaseParams<C, Ex, I>[0],
   machineGuards: AnyMachine['internal']['guards'],
 ) {
@@ -469,7 +471,7 @@ function o_readyToFindTransitionByEvent<C extends MContext, Ex extends EventBody
   }
 }
 
-export function deriveEventTransition<C extends MContext, Ex extends EventBody, I>(
+export function deriveEventTransition<C extends MContext, Ex extends SendableEvent, I>(
   eType: string,
   internalEPayload: InternalEPayload | undefined,
   fnBaseParam: FnBaseParams<C, Ex, I>[0],
@@ -721,7 +723,7 @@ function o_handleInvokedFnResult(
   }
 }
 
-export function launchInvocations<E extends EventBody, S extends ServiceRecord>(
+export function launchInvocations<E extends SendableEvent, S extends ServiceRecord>(
   invocations: NormalizedInvocation[],
   path: string,
   makeFnBaseParam: () => FnBaseParams<any, any, any>[0],
@@ -730,7 +732,7 @@ export function launchInvocations<E extends EventBody, S extends ServiceRecord>(
 ) {
   const { enqueueEvent } = rtOutbound
   const fnBaseParam = makeFnBaseParam()
-  for (const [i, { input, mainKey, subKey, src, emittedETypesToListen }] of invocations.entries()) {
+  for (const [i, { input, mainKey, subKey, src, emittableETypesToListen }] of invocations.entries()) {
     const [srcType, srcValue] = (() => {
       const { type, value } = src
       if (type !== 'string') {
@@ -770,7 +772,7 @@ export function launchInvocations<E extends EventBody, S extends ServiceRecord>(
           }
           // TODO: 'invoke/:error:'
         })
-        for (const eType of emittedETypesToListen) {
+        for (const eType of emittableETypesToListen) {
           childRt.onEmitted(eType, (emittedEvent) => {
             enqueueEvent(
               {
@@ -789,9 +791,9 @@ export function launchInvocations<E extends EventBody, S extends ServiceRecord>(
         const abortController = new AbortController()
         const { signal } = abortController
         setChild({ stop: () => abortController.abort() })
-        const emit = (emittedEvent: EmittedEvent) => {
+        const emit = (emittedEvent: EmittableEvent) => {
           if (
-            !(emittedEvent && typeof emittedEvent === 'object' && emittedETypesToListen.includes(emittedEvent?.type))
+            !(emittedEvent && typeof emittedEvent === 'object' && emittableETypesToListen.includes(emittedEvent?.type))
           ) {
             throw new Error(`Invalid emittedEvent: ${JSON.stringify(emittedEvent)}`)
           }
@@ -840,7 +842,7 @@ export function launchInvocations<E extends EventBody, S extends ServiceRecord>(
   }
 }
 
-export function stopInvocations<E extends EventBody, S extends ServiceRecord>(
+export function stopInvocations<E extends SendableEvent, S extends ServiceRecord>(
   invocations: NormalizedInvocation[],
   rtOutbound: RuntimeOutbound<E, any, S>,
 ) {
@@ -853,7 +855,7 @@ export function stopInvocations<E extends EventBody, S extends ServiceRecord>(
   rtOutbound.children = newChildren
 }
 
-function o_gatherAllChildrenOutputs<C extends MContext, Ex extends EventBody, I>(
+function o_gatherAllChildrenOutputs<C extends MContext, Ex extends SendableEvent, I>(
   regions: Record<string, StateRoute>,
   parent: string,
   fnBaseParams: FnBaseParams<C, Ex, I>[0],
@@ -879,7 +881,7 @@ function o_gatherAllChildrenOutputs<C extends MContext, Ex extends EventBody, I>
   return output
 }
 
-export function* genChildDoneEvents<C extends MContext, Ex extends EventBody, I>(
+export function* genChildDoneEvents<C extends MContext, Ex extends SendableEvent, I>(
   reachedFinalStateData: [
     pPath: string,
     isRegionChild: boolean | undefined,
@@ -888,7 +890,7 @@ export function* genChildDoneEvents<C extends MContext, Ex extends EventBody, I>
   fnBaseParams: FnBaseParams<C, Ex, I>[0],
   crrStates: StateRoute,
   stateCatalog: Map<string, NormalizedStateItemBoth>,
-): Generator<[EventBody, InternalEPayload]> {
+): Generator<[SendableEvent, InternalEPayload]> {
   const accParallelRoots = new Set<string>()
   for (const [pPath, isRegionChild, final] of reachedFinalStateData) {
     if (!pPath) continue
@@ -948,7 +950,7 @@ export function* genChildDoneEvents<C extends MContext, Ex extends EventBody, I>
   }
 }
 
-function o_readyToFindAlwaysTransition<C extends MContext, Ex extends EventBody, I>(
+function o_readyToFindAlwaysTransition<C extends MContext, Ex extends SendableEvent, I>(
   fnBaseParam: FnBaseParams<C, Ex, I>[0],
   machineGuards: AnyMachine['internal']['guards'],
 ) {
@@ -966,7 +968,7 @@ function o_readyToFindAlwaysTransition<C extends MContext, Ex extends EventBody,
   }
 }
 
-export function evalAlwaysEvent<C extends MContext, Ex extends EventBody, I>(
+export function evalAlwaysEvent<C extends MContext, Ex extends SendableEvent, I>(
   fnBaseParam: FnBaseParams<C, Ex, I>[0],
   crrStates: StateRoute,
   machineGuards: AnyMachine['internal']['guards'],
