@@ -99,6 +99,9 @@ export class Runtime<
   get runtimeStatus() {
     return this.#snapshot.runtimeStatus
   }
+  get output() {
+    return this.#snapshot.output
+  }
   getSnapshot() {
     return this.#snapshot
   }
@@ -167,10 +170,8 @@ export class Runtime<
     }
     const handlerWrapper = (emittedEvent: EM<Mt>) => handler(emittedEvent)
     listeners.add(handlerWrapper)
-    return {
-      unsubscribe: () => {
-        listeners.delete(handlerWrapper)
-      },
+    return () => {
+      listeners.delete(handlerWrapper)
     }
   }
 

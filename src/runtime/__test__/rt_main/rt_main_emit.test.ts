@@ -58,9 +58,9 @@ describe('rt_main_emit', () => {
   test('0:unsubscribe 後は呼ばれない', async () => {
     const rt = makeRuntime(counterMachine).start()
     const handler = jest.fn()
-    const sub = rt.onEmitted('incremented', handler)
+    const unsubscribe = rt.onEmitted('incremented', handler)
     rt.send({ type: 'inc' })
-    sub.unsubscribe()
+    unsubscribe()
     rt.send({ type: 'inc' })
 
     expect(handler).toHaveBeenCalledTimes(1)
