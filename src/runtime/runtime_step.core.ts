@@ -32,9 +32,9 @@ import type {
 } from '../machine/m.types'
 import { SystemEventSymbol } from '../machine/m.types'
 import { ST_DELIM } from '../shared/constants'
-import type { Placeholder, RecursiveRecord, Values } from '../shared/general.types'
+import type { AnyFn, Placeholder, RecursiveRecord, Values } from '../shared/general.types'
 import { deepFreeze, parentPathOf, splitStPath } from '../shared/utils'
-import { makeRuntime, Runtime } from './Runtime'
+import { makeRuntime } from './Runtime'
 import type { Children, RuntimeOutbound, StateRoute } from './r.types'
 import {
   readyToEvalGuard,
@@ -338,15 +338,12 @@ export function readyAction<
     ...args: [event: SendableEvent] | [subKey: string | number, event: SendableEvent]
   ) {
     const [subKey, sEvent] = args.length == 2 ? args : (['', args[0]] as const)
-    const target = subKey || typeof subKey === 'number' ? `${serviceName}:${subKey}` : serviceName
-    if (!Object.hasOwn(rtOutbound.children, target)) {
-      throw new Error(`Cannot send event to "${target}": child not found.`)
+    const childKey = subKey || typeof subKey === 'number' ? `${serviceName}:${subKey}` : serviceName
+    if (!Object.hasOwn(rtOutbound.children, childKey)) {
+      throw new Error(`Cannot send event to "${childKey}": child not found.`)
     }
-    const service = rtOutbound.children[target]
-    if (!(service instanceof Runtime)) {
-      throw new Error(`Cannot send event to "${target}": child is not a machine runtime.`)
-    }
-    service.send(sEvent)
+    const service = rtOutbound.children[childKey]
+    service?.send(sEvent)
   }
 
   let isProcessingQueue = false
@@ -703,18 +700,13 @@ function o_handleInvokedFnResult(
   invocationIdx: number,
   abortController: AbortController,
   rtOutbound: RuntimeOutbound<any, any, any>,
-  setChild: (value: Children<any>[string]) => void,
+  extendStopWithCleanup: (cleanup: AnyFn) => void,
 ) {
   const { signal } = abortController
   if (typeof output === 'function') {
     signal.aborted
       ? output()
-      : setChild({
-        stop: () => {
-          abortController.abort()
-          output()
-        },
-      })
+      : extendStopWithCleanup(output as AnyFn)
   } else if (!signal.aborted) {
     rtOutbound.enqueueEvent(
       {
@@ -794,7 +786,6 @@ export function launchInvocations<E extends SendableEvent, S extends ServiceReco
       case 'function': {
         const abortController = new AbortController()
         const { signal } = abortController
-        setChild({ stop: () => abortController.abort() })
         const emit = (emittedEvent: EmittableEvent) => {
           if (
             !(emittedEvent && typeof emittedEvent === 'object' && emittableETypesToListen.includes(emittedEvent?.type))
@@ -806,9 +797,22 @@ export function launchInvocations<E extends SendableEvent, S extends ServiceReco
             { path },
           )
         }
+        type Listener = (event: SendableEvent) => void
+        const listeners = new Set<Listener>()
+        const listen = (listener: Listener) => { listeners.add(listener) }
+        const child = {
+          send(event: SendableEvent) {
+            listeners.forEach((listener) => listener(event))
+          },
+          stop() {
+            abortController.abort()
+            listeners.clear()
+          }
+        }
+        setChild(child)
         const result = (() => {
           try {
-            return (srcValue as ServiceFn)(inputValue, emit, signal)
+            return (srcValue as ServiceFn)(inputValue, emit, listen, signal)
           } catch (error) {
             if (!signal.aborted) {
               enqueueEvent(
@@ -822,12 +826,19 @@ export function launchInvocations<E extends SendableEvent, S extends ServiceReco
             }
           }
         })()
+        const extendStopWithCleanup = (cleanup: AnyFn) => {
+          child.stop = () => {
+            abortController.abort()
+            listeners.clear()
+            cleanup()
+          }
+        }
         if (!(result instanceof Promise)) {
-          o_handleInvokedFnResult(result, path, i, abortController, rtOutbound, setChild)
+          o_handleInvokedFnResult(result, path, i, abortController, rtOutbound, extendStopWithCleanup)
           return
         }
         result
-          .then((output) => o_handleInvokedFnResult(output, path, i, abortController, rtOutbound, setChild))
+          .then((output) => o_handleInvokedFnResult(output, path, i, abortController, rtOutbound, extendStopWithCleanup))
           .catch((error) => {
             if (!signal.aborted) {
               enqueueEvent(

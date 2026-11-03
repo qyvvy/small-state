@@ -173,7 +173,7 @@ describe('rt_main_invoke', () => {
     test('4.1:キャンセルされると signal が abort に', async () => {
       let signal!: AbortSignal
       const rt = makeRuntime(
-        build((_, __, sig) => {
+        build((_, _emit, _listen, sig) => {
           signal = sig
           return new Promise(() => { })
         }),
@@ -190,7 +190,7 @@ describe('rt_main_invoke', () => {
       const d = deferred<string>()
       let signal!: AbortSignal
       const rt = makeRuntime(
-        build((_, __, sig) => {
+        build((_input, _emit, _listen, sig) => {
           signal = sig
           return d.promise
         }),

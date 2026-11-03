@@ -871,9 +871,7 @@ function getDefinitionAndCatalog<
   }
 }
 
-export function defServiceFn<TFn extends (input: any, emit: EmitFn<EmittableEvent>, signal: AbortSignal) => unknown>(
-  fn: TFn,
-) {
+export function defServiceFn<TFn extends ServiceFn>(fn: TFn) {
   return fn
 }
 

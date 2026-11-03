@@ -94,31 +94,30 @@ export type UpdateFnParam<C extends MContext> = {
 }
 export type UpdateFn<C extends MContext> = (updates: UpdateFnParam<C>) => unknown
 
-type O_ToMachineOnlyRecord<S extends ServiceRecord> = {
-  [K in keyof S as
-  S[K] extends AnyMachine ? K : never
-  ]: S[K] extends AnyMachine ? S[K] : never
-}
-type O_InferSendableEvent<M extends AnyMachine> =
-  M extends Machine<any, infer E, any, any, any, any, any, any, any> ? E : never
+type O_InferSendableEvent<S extends ServiceRecord[string]> =
+  S extends Machine<any, infer E, any, any, any, any, any, any, any> ? E :
+  S extends AnyFn
+  ? (Parameters<S>[2] extends ListenFn<infer Er> ? Er : never)
+  : never
 
 export type SendToFn<
   S extends ServiceRecord,
-  Sm extends O_ToMachineOnlyRecord<S> = O_ToMachineOnlyRecord<S>
 > = {
-  <Sk extends keyof Sm>(
+  <Sk extends keyof S>(
     serviceName: Sk,
     subKey: string | number,
-    event: O_InferSendableEvent<Sm[Sk extends keyof Sm ? Sk : never]>
+    event: O_InferSendableEvent<S[Sk]>
   ): void
-  <Sk extends keyof Sm>(
+  <Sk extends keyof S>(
     serviceName: Sk,
-    event: O_InferSendableEvent<Sm[Sk extends keyof Sm ? Sk : never]>
+    event: O_InferSendableEvent<S[Sk]>
   ): void
 }
 
 
-export type EmitFn<EM extends EmittableEvent> = (event: EM) => unknown
+export type EmitFn<EM extends EmittableEvent> = (event: EM) => void
+
+export type ListenFn<E extends SendableEvent> = (listener: (event: E) => void) => void
 
 
 
@@ -202,11 +201,8 @@ export type ParamsInputArgsOf<
   : [params: ParamsInput<IR[IRk], C, Ex, I>]
 
 
-export type ServiceFn<
-  TInput = any,
-  TEmittable extends EmittableEvent = EmittableEvent,
-> =
-  (input: TInput, emit: EmitFn<TEmittable>, signal: AbortSignal) => unknown
+export type ServiceFn<TInput = any> =
+  (input: TInput, emit: EmitFn<EmittableEvent>, listen: ListenFn<any>, signal: AbortSignal) => unknown
 
 export type ServiceRecord = Record<string, ServiceFn | AnyMachine>
 

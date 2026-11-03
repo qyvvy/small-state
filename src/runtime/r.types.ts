@@ -16,7 +16,7 @@ export type StateRoute = Array<string | { parallel: string; regions: { [key: str
 type Child<TService> = TService extends AnyMachine
   ? Runtime<TService>
   : TService extends AnyFn
-  ? { stop: () => void }
+  ? { stop: () => void, send: (event: SendableEvent) => void }
   : never
 export type Children<S extends ServiceRecord> = {
   [K in keyof S & string as K | `${K}:${string | number}`]?: Child<S[K]>

@@ -3,6 +3,7 @@ export type {
   BuiltinEType,
   EmitFn as Emit,
   EmittableEvent,
+  ListenFn as Listen,
   MContext,
   SendableEvent,
   ServiceFn,
