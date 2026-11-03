@@ -51,8 +51,8 @@ export type ActionFnParams<
     check: CheckFn<C, Ex, I, G>
     enqueue: EnqueueFn<C, Ex, I, EM, A>
     update: UpdateFn<C>
-    sendTo: SendToFn<S>
     emit: EmitFn<EM>
+    sendTo: SendToFn<S>
   }
 >
 export type LimitedActionFnParams<
@@ -64,8 +64,13 @@ export type LimitedActionFnParams<
 > = FnBaseParams<C, E, I, {
   update: UpdateFn<C>,
   emit: EmitFn<EM>
+  // TODO: sendTo を追加できるか検討。S を持ってくるのが難しいから保留してるような気がする。
 }, Prm>
 
+/**
+ * check(type: {[guardName: keyof G]: ParamsOfGuard}): boolean
+ * check(type: keyof G, params?: ParamsOfGuard): boolean
+ */
 export type CheckFn<
   C extends MContext, Ex extends SendableEvent, I, G extends Record<string, Placeholder>
 > = {
@@ -76,8 +81,8 @@ export type CheckFn<
 }
 
 /**
- * enqueue(type: {[KeyOfAction: string]: ParamsOfAction}): void
- * enqueue(type: KeyOfAction, params?: ParamsOfAction): void
+ * enqueue(type: {[actionName: keyof A]: ParamsOfTheAction}): void
+ * enqueue(type: keyof A, params?: ParamsOfTheAction): void
  * enqueue(fn: (arg: FnBaseParams & {update: UpdateFn, emit: EmitFn}) => void): void
  */
 export type EnqueueFn<
