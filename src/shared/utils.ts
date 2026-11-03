@@ -4,33 +4,11 @@ export function ensureArray<T>(v: T | T[] | undefined): T[] {
   return Array.isArray(v) ? v : !v ? [] : [v]
 }
 
-export function randomString(length = 16) {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
-  const chLen = chars.length
-  return Array.from(crypto.getRandomValues(new Uint8Array(length)), (x) => chars[x % chLen]).join('')
-}
-
-export function assertOrWarn<T>(validCondition: T, msg: string): validCondition is NonNullable<T> {
-  return validCondition ? true : (console.warn(msg), false)
-}
-
 export function assertOrThrow<T>(validCondition: T, msg: string): validCondition is NonNullable<T> {
   if (!validCondition) {
     throw new Error(msg)
   }
   return true
-}
-
-
-export function stringifyCircular(target: any) {
-  const seen = new WeakSet()
-  return JSON.stringify(target, (_, value: any) => {
-    if (typeof value === "object" && value !== null) {
-      if (seen.has(value)) return
-      seen.add(value)
-    }
-    return value
-  })
 }
 
 
@@ -57,11 +35,6 @@ export function deepFreeze<T>(obj: T): Readonly<T> {
     console.error("Error occurred in deepFreeze:", error)
     return obj;
   }
-}
-
-type O_Entries<T> = (keyof T extends infer U ? (U extends keyof T ? [U, T[U]] : never) : never)[]
-export function getObjEntries<T extends Record<string, unknown>>(obj: T): O_Entries<T> {
-  return Object.entries(obj) as O_Entries<T>
 }
 
 // Object.defineProperty に typescript の型チェック(value の型)を追加: 主に writable 用途
