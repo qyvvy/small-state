@@ -626,6 +626,7 @@ describe('rt_main_invoke', () => {
         ({ on }) => ({
           waiting: [
             on('ping', { to: 'done', actions: [({ e }) => received(e), ({ update, e }) => update({ v: e.v })] }),
+            on('emit', { actions: [({ emit, e }) => emit({ type: 'emitted', emittedV: e.v })] }),
           ],
           done: null,
         }),
@@ -634,13 +635,19 @@ describe('rt_main_invoke', () => {
       const parent = makeMachine(
         {
           services: { child },
-          types: { context: {} as { pong?: number }, events: {} as { type: 'go' } },
+          types: { context: {} as { pong?: number, emittedV?: number }, events: {} as { type: 'go' } },
           initContext: () => ({}),
         },
         ({ invoke, on }) => ({
           waiting: [
             invoke('child', on(':done:', { to: 'done', actions: [({ update, e }) => update({ pong: e.output })] })),
-            on('go', { actions: ({ sendTo }) => sendTo('child', { type: 'ping', v: 7 }) }),
+            invoke('child', { subKey: 2 }, on('emitted', { actions: [({ update, e }) => update({ emittedV: e.emittedV })] })),
+            on('go', {
+              actions: ({ sendTo }) => {
+                sendTo('child', 2, { type: 'emit', v: 9 })
+                sendTo('child', { type: 'ping', v: 7 })
+              }
+            }),
           ],
           done: null,
         }),
@@ -653,6 +660,7 @@ describe('rt_main_invoke', () => {
       })
       expect(received).toHaveBeenCalledWith({ type: 'ping', v: 7 })
       expect(rt.context.pong).toBe(7)
+      expect(rt.context.emittedV).toBe(9)
     })
 
     test('0:子から親へのemit', async () => {

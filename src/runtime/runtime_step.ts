@@ -38,7 +38,7 @@ function execTExecActions<Eo extends SendableEvent>(
 
   let i: number, tExec: TransitionExec, action: NormalizedAction
   try {
-    for (const tExec of tExecs) {
+    for (tExec of tExecs) {
       for ([i, action] of tExec.transition.actions.entries()) {
         execAction(action, internalQueueEvent)
         processQueue()

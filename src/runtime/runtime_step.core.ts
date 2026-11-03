@@ -6,7 +6,6 @@ import type {
   EmittableEvent,
   EnqueueFn,
   FnBaseParams,
-  InferSendableEvent,
   InternalEPayload,
   InternalEType,
   LimitedActionFnParams,
@@ -334,7 +333,12 @@ export function readyAction<
     return fn(fnBaseParam, typeof params !== 'function' ? params : params(fnBaseParam))
   }
 
-  function sendTo(target: string, event: InferSendableEvent<AnyMachine>) {
+  function sendTo(
+    serviceName: string,
+    ...args: [event: SendableEvent] | [subKey: string | number, event: SendableEvent]
+  ) {
+    const [subKey, sEvent] = args.length == 2 ? args : (['', args[0]] as const)
+    const target = subKey || typeof subKey === 'number' ? `${serviceName}:${subKey}` : serviceName
     if (!Object.hasOwn(rtOutbound.children, target)) {
       throw new Error(`Cannot send event to "${target}": child not found.`)
     }
@@ -342,7 +346,7 @@ export function readyAction<
     if (!(service instanceof Runtime)) {
       throw new Error(`Cannot send event to "${target}": child is not a machine runtime.`)
     }
-    service.send(event)
+    service.send(sEvent)
   }
 
   let isProcessingQueue = false

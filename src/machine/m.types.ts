@@ -30,9 +30,6 @@ export type SendableEvent = { type: string;[key: string]: any }
 export type EmittableEvent = { type: string;[key: string]: any }
 export type StateName = string
 
-export type InferSendableEvent<M extends AnyMachine> =
-  M extends Machine<any, infer E, any, any, any, any, any, any, any> ? E : never
-
 // type 以外のプロパティを持たない SendableEvent の型を抽出する
 export type PureETypeString<E extends SendableEvent> =
   E extends unknown ? Exclude<keyof E, "type"> extends never ? E['type'] : never : any
@@ -102,15 +99,23 @@ type O_ToMachineOnlyRecord<S extends ServiceRecord> = {
   S[K] extends AnyMachine ? K : never
   ]: S[K] extends AnyMachine ? S[K] : never
 }
-type O_RemoveAfterColon<Sk> = Sk extends `${infer T}:${string}` ? T : Sk
+type O_InferSendableEvent<M extends AnyMachine> =
+  M extends Machine<any, infer E, any, any, any, any, any, any, any> ? E : never
+
 export type SendToFn<
   S extends ServiceRecord,
   Sm extends O_ToMachineOnlyRecord<S> = O_ToMachineOnlyRecord<S>
-> =
-  <Sk extends keyof Sm | `${keyof Sm & string}:${string}`>(
-    target: Sk,
-    event: InferSendableEvent<Sm[O_RemoveAfterColon<Sk> extends infer T extends keyof Sm ? T : never]>
-  ) => void
+> = {
+  <Sk extends keyof Sm>(
+    serviceName: Sk,
+    subKey: string | number,
+    event: O_InferSendableEvent<Sm[Sk extends keyof Sm ? Sk : never]>
+  ): void
+  <Sk extends keyof Sm>(
+    serviceName: Sk,
+    event: O_InferSendableEvent<Sm[Sk extends keyof Sm ? Sk : never]>
+  ): void
+}
 
 
 export type EmitFn<EM extends EmittableEvent> = (event: EM) => unknown
