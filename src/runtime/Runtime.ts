@@ -177,7 +177,8 @@ export class Runtime<
 
   #processSentEvent<Ex extends E<Mt> | BuiltinSendableEvent | SystemSendableEvent>(event: Ex, internalEPayload?: InternalEPayload) {
     if (event === STOP_EVENT) {
-      return this.#stop()
+      this.#dispose()
+      return this.#buildAndSetSnapshot(this.#realContext, false, 'stopped')()
     }
     const { guards, actions } = this.#machineInternal
     const actionRunner = readyAction<C<Mt>, E<Mt>, I<Mt>, EM<Mt>, G<Mt>, A<Mt>, S<Mt>, Ex>(
@@ -205,7 +206,7 @@ export class Runtime<
     }
   }
 
-  #stop() {
+  #dispose() {
     {
       const children = { ...this.#outbound.children }
       for (const id in children) {
@@ -214,7 +215,7 @@ export class Runtime<
       }
       this.#outbound.children = children
     }
-    this.#buildAndSetSnapshot(this.#realContext, false, 'stopped')()
+    this.#sentQueue.clear()
     this.#observers.clear()
     this.#emittedListeners.clear()
   }
@@ -291,9 +292,7 @@ export class Runtime<
       }
 
       if (isCompleted) {
-        this.#sentQueue.clear()
-        this.#observers.clear()
-        this.#emittedListeners.clear()
+        this.#dispose()
       }
     }
   }
