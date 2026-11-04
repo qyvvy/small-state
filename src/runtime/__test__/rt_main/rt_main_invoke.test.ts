@@ -100,7 +100,7 @@ describe('rt_main_invoke', () => {
     expect(rt.context.error).toBe(err)
   })
 
-  test.todo('0:onError が未定義のときでも subscribe で捕捉できる', async () => {
+  test('2: :error: が未定義のときでも subscribe で捕捉できる', async () => {
     const machine = makeMachine(
       {
         initContext: () => ({ error: null as unknown }),
@@ -109,7 +109,7 @@ describe('rt_main_invoke', () => {
         loading: [
           invoke(
             async () => {
-              throw Error()
+              throw Error('this is error.')
             },
             on(':done:', { to: 'success' }),
           ),
@@ -119,14 +119,40 @@ describe('rt_main_invoke', () => {
       }),
     )
     const rt = makeRuntime(machine)
-    // TODO: subscribe で error を捕捉できるようにする
-    const errSpy = jest.fn((x) => {
-      console.log(`DBG:100: `, x)
+    const errSpy = jest.fn((e) => {
+      expect(e.message).toBe('this is error.')
     })
-    rt.subscribe(errSpy)
+    rt.subscribe(undefined, errSpy)
     rt.start()
     await flush()
     expect(errSpy).toHaveBeenCalled()
+  })
+
+  test('2: :error: が定義済みのとき subscribe にエラーは流れない', async () => {
+    const machine = makeMachine(
+      {
+        initContext: () => ({ error: null as unknown }),
+      },
+      ({ invoke, on }) => ({
+        loading: [
+          invoke(
+            () => {
+              throw Error()
+            },
+            on(':done:', { to: 'success' }),
+            on(':error:', { actions: () => { } }),
+          ),
+        ],
+        success: null,
+        failure: null,
+      }),
+    )
+    const rt = makeRuntime(machine)
+    const errSpy = jest.fn(() => { })
+    rt.subscribe(undefined, errSpy)
+    rt.start()
+    await flush()
+    expect(errSpy).not.toHaveBeenCalled()
   })
 
   test('3:input の src への受け渡し', async () => {
