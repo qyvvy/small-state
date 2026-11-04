@@ -222,10 +222,11 @@ export class Runtime<
 
   #_emit(emittedEvent: EM<Mt>) {
     const listeners = this.#emittedListeners.get(emittedEvent.type)
-    if (!listeners) {
+    const wildcardListener = this.#emittedListeners.get('*');
+    if (!(listeners || wildcardListener)) {
       return
     }
-    for (const handler of listeners) {
+    for (const handler of [...(listeners || []), ...(wildcardListener || [])]) {
       try {
         handler(emittedEvent)
       } catch (err) {
