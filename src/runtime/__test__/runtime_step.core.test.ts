@@ -105,7 +105,8 @@ describe('runtime_step.core', () => {
           { type: 'emittedFoo' },
           { guardFalse: unknown; guardFoo: { value: number } },
           { inc: unknown },
-          ServiceRecord
+          ServiceRecord,
+          { type: 'eventFoo'; value: number }
         >
       >
       const context = { name: '', count: 0, flag: false as boolean }
@@ -118,7 +119,7 @@ describe('runtime_step.core', () => {
           {
             inc: ({ c, update }) => update({ count: c.count + 1 }),
           },
-          { emit: (emitted) => mockFn1(emitted), children: {}, enqueueEvent: () => null },
+          { id: '', emit: (emitted) => mockFn1(emitted), children: {}, enqueueEvent: () => null },
         )
       })
 
