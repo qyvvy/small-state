@@ -10,7 +10,7 @@ import type {
 } from '../machine/m.types'
 import { ST_DELIM } from '../shared/constants'
 import type { Expand } from '../shared/general.types'
-import { defineFixedProperty } from '../shared/utils'
+import { defineFixedProperty, reportUnhandledError } from '../shared/utils'
 import { MailBox } from './MailBox'
 import type { Children, InferMInput, InferredMachineTypes, RuntimeOutbound, StateRoute } from './r.types'
 import { initRuntime, macrostep } from './runtime_step'
@@ -30,10 +30,10 @@ export type Snapshot<C extends MContext, O, S extends ServiceRecord> = {
   _children: Children<S>
 }
 
-type Observer<C extends MContext, O, S extends ServiceRecord> = (
-  current: Expand<Snapshot<C, O, S>>,
-  prev: Expand<Snapshot<C, O, S>>,
-) => void
+type Subscriber<C extends MContext, O, S extends ServiceRecord> = {
+  onSnapshot?: (current: Expand<Snapshot<C, O, S>>, prev: Expand<Snapshot<C, O, S>>) => void
+  onError?: (err: unknown) => void
+}
 
 export type RuntimeOptions<I> = {
   id?: string
@@ -82,10 +82,9 @@ export class Runtime<
     emit: this.#_emit.bind(this),
     children: {},
   }
-  #observers = new Set<Observer<C<Mt>, O<Mt>, S<Mt>>>()
+  #subscribers = new Set<Subscriber<C<Mt>, O<Mt>, S<Mt>>>()
   #emittedListeners: Map<string, Set<(emittedEvent: EM<Mt>) => void>> = new Map()
   #snapshot = {} as Snapshot<C<Mt>, O<Mt>, S<Mt>>
-  #isStarted = false
 
   get states() {
     return this.#snapshot.states
@@ -120,16 +119,19 @@ export class Runtime<
     this.#buildAndSetSnapshot(context, true, 'notStarted')()
   }
 
-  subscribe(observer: Observer<C<Mt>, O<Mt>, S<Mt>>) {
-    this.#observers.add(observer)
+  subscribe(
+    onSnapshot: Subscriber<C<Mt>, O<Mt>, S<Mt>>['onSnapshot'],
+    onError?: Subscriber<C<Mt>, O<Mt>, S<Mt>>['onError']
+  ) {
+    const subscriber = { onSnapshot, onError }
+    this.#subscribers.add(subscriber)
     return () => {
-      this.#observers.delete(observer)
+      this.#subscribers.delete(subscriber)
     }
   }
 
   start() {
-    if (this.#isStarted) return this
-    this.#isStarted = true
+    if (this.runtimeStatus !== 'notStarted') return this
 
     const { context, hasTransitioned, doneEvent } = initRuntime(
       this.#realContext,
@@ -147,7 +149,7 @@ export class Runtime<
   send(event: E<Mt> | PureETypeString<E<Mt>>) {
     const eventObj = (typeof event === 'string' ? { type: event } : event) as E<Mt>
     if (this.#snapshot.runtimeStatus !== 'active') {
-      console.warn(`Event "${eventObj.type}" was sent to non-active runtime: ${this.id}`)
+      console.warn(`RT"${this.id}"> Event "${eventObj.type}" was sent to non-active runtime: ${this.id}`)
       return this
     }
     this.#enqueueEvent(eventObj)
@@ -216,7 +218,7 @@ export class Runtime<
       this.#outbound.children = children
     }
     this.#sentQueue.clear()
-    this.#observers.clear()
+    this.#subscribers.clear()
     this.#emittedListeners.clear()
   }
 
@@ -230,7 +232,7 @@ export class Runtime<
       try {
         handler(emittedEvent)
       } catch (err) {
-        // TODO: error handling
+        reportUnhandledError(err)
       }
     }
   }
@@ -287,8 +289,13 @@ export class Runtime<
 
       {
         const snapshot = this.#snapshot
-        for (const observer of this.#observers) {
-          observer(snapshot, oldSnapshot)
+        for (const { onSnapshot } of this.#subscribers) {
+          if (!onSnapshot) continue
+          try {
+            onSnapshot(snapshot, oldSnapshot)
+          } catch (err) {
+            reportUnhandledError(err)
+          }
         }
       }
 

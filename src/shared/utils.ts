@@ -11,6 +11,12 @@ export function assertOrThrow<T>(validCondition: T, msg: string): validCondition
   return true
 }
 
+// catch させず、実行中のマイクロタスク完了まで待ってから投げるエラー
+// small-state の責務の外のエラー
+export function reportUnhandledError(err: unknown) {
+  setTimeout(() => { throw err })
+}
+
 
 // == object 関係 ==
 
