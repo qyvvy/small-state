@@ -1533,6 +1533,10 @@ describe('machine', () => {
                         cond: expect.any(Function),
                         transitions: [{ actions: [expect.any(Function)], guards: [] }],
                       },
+                      'invoke/:error:[1]': {
+                        cond: expect.any(Function),
+                        transitions: [{ actions: [expect.any(Function)], guards: [] }],
+                      },
                       'invoke/EMITTABLE1[1]': {
                         cond: expect.any(Function),
                         transitions: [{ actions: [expect.any(Function)], guards: [] }],

@@ -519,7 +519,9 @@ function x_parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateN
             const { invocations, internalEvents } = def
             const emittableETypesToListen: string[] = []
             invocations.push({ ...item[4], src, emittableETypesToListen, mainKey: '' })
+            const suffixNum = invocations.length - 1
 
+            let hasErrObserver = false
             for (const [j, [ivkEType, _, ivkTransitions]] of item[5].entries()) {
               const transitions = ensureArray(ivkTransitions!)
               if (!transitions.length || transitions.some((t) => !Object.keys(t).length)) {
@@ -527,7 +529,7 @@ function x_parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateN
                   `createMachine: on(eventType, config): The 'config' argument is required, at state:"${stateName}"[${i}] > invoke events[${j}] event:"${ivkEType}"`,
                 )
               }
-              const eType: `invoke/${string}[${number}]` = `invoke/${ivkEType}[${invocations.length - 1}]`
+              const eType: `invoke/${string}[${number}]` = `invoke/${ivkEType}[${suffixNum}]`
               if (Object.hasOwn(internalEvents, eType)) {
                 throw new Error(
                   `createMachine: Duplicate event definition for event "${ivkEType}", at state:"${stateName}"[${i}] > invoke events[${j}]`,
@@ -537,8 +539,19 @@ function x_parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateN
                 cond: ({ path }: InternalEPayload) => path === _getPath(),
                 transitions: o_normalizeTransitions(transitions),
               }
-              if (!(ivkEType === ':done:' || ivkEType === ':error:')) {
+              if (ivkEType === ':error:') {
+                hasErrObserver = true
+              } else if (ivkEType !== ':done:') {
                 emittableETypesToListen.push(ivkEType)
+              }
+            }
+            if (!hasErrObserver) {
+              // 非同期処理をキューで受けられるようにする
+              internalEvents[`invoke/:error:[${suffixNum}]`] = {
+                cond: ({ path }: InternalEPayload) => path === _getPath(),
+                transitions: [
+                  { guards: [], actions: [({ e }) => { throw e.error }] },
+                ],
               }
             }
             break

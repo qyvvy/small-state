@@ -32,10 +32,10 @@ import type {
 } from '../machine/m.types'
 import { SystemEventSymbol } from '../machine/m.types'
 import { ST_DELIM } from '../shared/constants'
-import type { AnyFn, Placeholder, RecursiveRecord, Values } from '../shared/general.types'
+import type { Placeholder, RecursiveRecord, Values } from '../shared/general.types'
 import { deepFreeze, parentPathOf, splitStPath } from '../shared/utils'
 import { makeRuntime } from './Runtime'
-import type { Children, RuntimeOutbound, StateRoute } from './r.types'
+import type { RuntimeOutbound, StateRoute } from './r.types'
 import {
   readyToEvalGuard,
   resolveActionElement,
@@ -297,7 +297,7 @@ export function readyAction<
 
   const update: UpdateFn<C> = (updates: UpdateFnParam<C>) => {
     if (!updates || typeof updates !== 'object') {
-      throw new Error(`invalid updates argument: ${JSON.stringify(updates)}`)
+      throw new Error(`RT"${rtOutbound.id}"> Invalid updates argument: ${JSON.stringify(updates)}`)
     }
     updateApplications.push(updates)
   }
@@ -340,7 +340,7 @@ export function readyAction<
     const [subKey, sEvent] = args.length == 2 ? args : (['', args[0]] as const)
     const childKey = subKey || typeof subKey === 'number' ? `${serviceName}:${subKey}` : serviceName
     if (!Object.hasOwn(rtOutbound.children, childKey)) {
-      throw new Error(`Cannot send event to "${childKey}": child not found.`)
+      throw new Error(`RT"${rtOutbound.id}"> Cannot send event to "${childKey}": child not found.`)
     }
     const service = rtOutbound.children[childKey]
     service?.send(sEvent)
@@ -357,7 +357,7 @@ export function readyAction<
     ...args: ParamsInputArgsOf<A, Ak, C, Ex, I>
   ) {
     if (isProcessingQueue) {
-      throw new Error('Nested enqueue operations are not supported.')
+      throw new Error(`RT"${rtOutbound.id}"> Nested enqueue operations are not supported.`)
     }
     const [fn, params] = resolveActionElement<C, Ex, I, EM>(type, machineActions, args?.[0])
     enqActions.push({ fn, params })
@@ -694,31 +694,6 @@ export function* updateStateRouteForEntry(
   )
 }
 
-function o_handleInvokedFnResult(
-  output: unknown,
-  path: string,
-  invocationIdx: number,
-  abortController: AbortController,
-  rtOutbound: RuntimeOutbound<any, any, any>,
-  extendStopWithCleanup: (cleanup: AnyFn) => void,
-) {
-  const { signal } = abortController
-  if (typeof output === 'function') {
-    signal.aborted
-      ? output()
-      : extendStopWithCleanup(output as AnyFn)
-  } else if (!signal.aborted) {
-    rtOutbound.enqueueEvent(
-      {
-        type: `invoke/:done:[${invocationIdx}]` as const,
-        payload: { type: ':done:', output },
-        [SystemEventSymbol]: true,
-      },
-      { path },
-    )
-  }
-}
-
 export function launchInvocations<E extends SendableEvent, S extends ServiceRecord>(
   invocations: NormalizedInvocation[],
   path: string,
@@ -735,17 +710,33 @@ export function launchInvocations<E extends SendableEvent, S extends ServiceReco
         return [type, value]
       }
       const service = machineServices[value]
-      if (!service) throw new Error(`invoke: Unknown src: "${value}"`)
+      if (!service) throw new Error(`RT"${rtOutbound.id}"> invoke: Unknown src: "${value}"`)
       return [typeof service === 'function' ? 'function' : 'machine', service]
     })()
 
     const childKey = subKey ? `${mainKey}:${subKey}` : mainKey
     if (rtOutbound.children[childKey]) {
-      throw new Error(`Service with ID '${childKey}' is already running.`)
+      throw new Error(`RT"${rtOutbound.id}"> Service with ID '${childKey}' is already running.`)
     }
-    const setChild = (value: Children<any>[string]) => {
-      rtOutbound.children = { ...rtOutbound.children, [childKey]: value }
+    const onDone = (output: unknown) => enqueueEvent(
+      {
+        type: `invoke/:done:[${i}]` as const,
+        payload: { type: ':done:', output },
+        [SystemEventSymbol]: true,
+      },
+      { path },
+    )
+    const onError = (error: unknown) => {
+      enqueueEvent(
+        {
+          type: `invoke/:error:[${i}]` as const,
+          payload: { type: ':error:', error },
+          [SystemEventSymbol]: true,
+        },
+        { path },
+      )
     }
+
     const inputValue = input && typeof input === 'function' ? input(fnBaseParam) : undefined
 
     switch (srcType) {
@@ -754,20 +745,12 @@ export function launchInvocations<E extends SendableEvent, S extends ServiceReco
           id: `${rtOutbound.id}/${childKey}`,
           input: () => inputValue,
         })
-        setChild(childRt)
+        rtOutbound.children = { ...rtOutbound.children, [childKey]: childRt }
         childRt.subscribe(({ runtimeStatus, output }) => {
           if (runtimeStatus === 'done') {
-            enqueueEvent(
-              {
-                type: `invoke/:done:[${i}]` as const,
-                payload: { type: ':done:', output },
-                [SystemEventSymbol]: true,
-              },
-              { path },
-            )
+            onDone(output)
           }
-          // TODO: 'invoke/:error:'
-        })
+        }, onError)
         for (const eType of emittableETypesToListen) {
           childRt.onEmitted(eType, (emittedEvent) => {
             enqueueEvent(
@@ -790,7 +773,7 @@ export function launchInvocations<E extends SendableEvent, S extends ServiceReco
           if (
             !(emittedEvent && typeof emittedEvent === 'object' && emittableETypesToListen.includes(emittedEvent?.type))
           ) {
-            throw new Error(`Invalid emittedEvent: ${JSON.stringify(emittedEvent)}`)
+            throw new Error(`RT"${rtOutbound.id}"> Invalid emittedEvent: ${JSON.stringify(emittedEvent)}`)
           }
           enqueueEvent(
             { type: `invoke/${emittedEvent?.type}[${i}]` as const, payload: emittedEvent, [SystemEventSymbol]: true },
@@ -809,46 +792,41 @@ export function launchInvocations<E extends SendableEvent, S extends ServiceReco
             listeners.clear()
           }
         }
-        setChild(child)
+        rtOutbound.children = { ...rtOutbound.children, [childKey]: child }
         const result = (() => {
           try {
             return (srcValue as ServiceFn)(inputValue, emit, listen, signal)
           } catch (error) {
             if (!signal.aborted) {
-              enqueueEvent(
-                {
-                  type: `invoke/:error:[${i}]` as const,
-                  payload: { type: ':error:', error },
-                  [SystemEventSymbol]: true,
-                },
-                { path },
-              )
+              onError(error)
             }
           }
         })()
-        const extendStopWithCleanup = (cleanup: AnyFn) => {
-          child.stop = () => {
-            abortController.abort()
-            listeners.clear()
-            cleanup()
+
+        const _handleOutput = (output: unknown) => {
+          if (typeof output === 'function') {
+            if (signal.aborted) {
+              output()
+            } else {
+              child.stop = () => {
+                abortController.abort()
+                listeners.clear()
+                output()
+              }
+            }
+          } else if (!signal.aborted) {
+            onDone(output)
           }
         }
         if (!(result instanceof Promise)) {
-          o_handleInvokedFnResult(result, path, i, abortController, rtOutbound, extendStopWithCleanup)
+          _handleOutput(result)
           return
         }
         result
-          .then((output) => o_handleInvokedFnResult(output, path, i, abortController, rtOutbound, extendStopWithCleanup))
+          .then((output) => _handleOutput(output))
           .catch((error) => {
             if (!signal.aborted) {
-              enqueueEvent(
-                {
-                  type: `invoke/:error:[${i}]` as const,
-                  payload: { type: ':error:', error },
-                  [SystemEventSymbol]: true,
-                },
-                { path },
-              )
+              onError(error)
             }
           })
         break

@@ -46,12 +46,9 @@ function execTExecActions<Eo extends SendableEvent>(
     }
   } catch (err) {
     const { lca, tIndex } = tExec!
-    if (!(err instanceof Error)) {
-      throw new Error(
-        `Unknown error occurred in state "${lca}", ${errLocation}[${tIndex}], actions[${i!}]: ${String(err)}`,
-      )
-    }
-    throw new Error(`Error occurred in state "${lca}", ${errLocation}[${tIndex}], actions[${i!}]`, { cause: err })
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error(`small-state: ${msg}`, { state: lca, location: `${errLocation}[${tIndex}], actions[${i!}]` })
+    throw err
   }
 }
 
@@ -223,7 +220,7 @@ function runExitAndEntryThenAlways<
       )
     hasTransitioned ||= tmp
     if (++i > MICROSTEP_LOOP_LIMIT) {
-      throw new Error(`Maximum number of microsteps exceeded`)
+      throw new Error(`RT"${rtOutbound.id}"> Maximum number of microsteps exceeded.`)
     }
   }
   return [hasTransitioned, doneEvent] as const
@@ -272,10 +269,9 @@ function exitAndEntry<
           }
         }
       } catch (err) {
-        if (!(err instanceof Error)) {
-          throw new Error(`Unknown error occurred during exit under "${lca}", exitHooks[${i!}]: ${String(err)}`)
-        }
-        throw new Error(`Error occurred during exit under "${lca}", exitHooks[${i!}]`, { cause: err })
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error(`small-state: ${msg}`, { runtimeId: rtOutbound.id, state: lca, location: `exitHooks[${i!}]` })
+        throw err
       }
     }
   }
@@ -322,11 +318,10 @@ function exitAndEntry<
         i += 1
       }
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
       const pth = ST_DELIM + fullToSplittees[i]?.join(ST_DELIM)
-      if (!(err instanceof Error)) {
-        throw new Error(`Unknown error occurred during entry "${pth}", entryHooks[${j!}]: ${String(err)}`)
-      }
-      throw new Error(`Error occurred during entry "${pth}", entryHooks[${i!}]`, { cause: err })
+      console.error(`small-state: ${msg}`, { runtimeId: rtOutbound.id, state: pth, location: `entryHooks[${j!}]` })
+      throw err
     }
     internalQueue.push(...genChildDoneEvents(accReachedFinal, makeFnBaseParam(), crrStates, stateCatalog))
   }

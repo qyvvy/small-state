@@ -27,6 +27,7 @@ export type Snapshot<C extends MContext, O, S extends ServiceRecord> = {
   c: Expand<X_RemovePrivateKeys<C>>
   runtimeStatus: RuntimeStatus
   output: O | undefined
+  error: unknown
   _children: Children<S>
 }
 
@@ -133,14 +134,22 @@ export class Runtime<
   start() {
     if (this.runtimeStatus !== 'notStarted') return this
 
-    const { context, hasTransitioned, doneEvent } = initRuntime(
-      this.#realContext,
-      this.#input,
-      this.#crrStates,
-      this.#machineInternal,
-      this.#outbound,
-    )
+    const result = (() => {
+      try {
+        return initRuntime(
+          this.#realContext,
+          this.#input,
+          this.#crrStates,
+          this.#machineInternal,
+          this.#outbound,
+        )
+      } catch (err) {
+        this.#handleError(err)
+      }
+    })()
+    if (!result) return this
 
+    const { context, hasTransitioned, doneEvent } = result
     this.#buildAndSetSnapshot(context, hasTransitioned, 'active')(doneEvent)
     this.#sentQueue.start()
     return this
@@ -182,30 +191,35 @@ export class Runtime<
       this.#dispose()
       return this.#buildAndSetSnapshot(this.#realContext, false, 'stopped')()
     }
-    const { guards, actions } = this.#machineInternal
-    const actionRunner = readyAction<C<Mt>, E<Mt>, I<Mt>, EM<Mt>, G<Mt>, A<Mt>, S<Mt>, Ex>(
-      this.#realContext,
-      event,
-      this.#input,
-      guards,
-      actions,
-      this.#outbound,
-    )
+    const result = (() => {
+      try {
+        const { guards, actions } = this.#machineInternal
+        const actionRunner = readyAction<C<Mt>, E<Mt>, I<Mt>, EM<Mt>, G<Mt>, A<Mt>, S<Mt>, Ex>(
+          this.#realContext,
+          event,
+          this.#input,
+          guards,
+          actions,
+          this.#outbound,
+        )
 
-    const result = macrostep(
-      event.type,
-      internalEPayload,
-      this.#crrStates,
-      actionRunner,
-      this.#machineInternal as any,
-      this.#outbound,
-    )
-    {
-      const { context, crrStates, hasTransitioned, doneEvent } = result
-      this.#crrStates = crrStates
+        return macrostep(
+          event.type,
+          internalEPayload,
+          this.#crrStates,
+          actionRunner,
+          this.#machineInternal as any,
+          this.#outbound,
+        )
+      } catch (err) {
+        this.#handleError(err)
+      }
+    })()
+    if (!result) return
 
-      this.#buildAndSetSnapshot(context, hasTransitioned)(doneEvent)
-    }
+    const { context, crrStates, hasTransitioned, doneEvent } = result
+    this.#crrStates = crrStates
+    this.#buildAndSetSnapshot(context, hasTransitioned)(doneEvent)
   }
 
   #dispose() {
@@ -284,6 +298,7 @@ export class Runtime<
           : output(runtimeUtils.makeFnBaseParam(
             newRealContext, (doneEvent || { type: ':done:', output: undefined }), this.#input
           )),
+        error: undefined,
         _children: this.#outbound.children,
       }
 
@@ -302,6 +317,23 @@ export class Runtime<
       if (isCompleted) {
         this.#dispose()
       }
+    }
+  }
+
+  #handleError(err: unknown) {
+    this.#snapshot = { ...this.#snapshot, runtimeStatus: 'error', error: err }
+    let shouldReport = !this.#subscribers.size
+    for (const { onError } of this.#subscribers) {
+      shouldReport ||= !onError
+      try {
+        onError?.(err)
+      } catch (err2) {
+        reportUnhandledError(err2)
+      }
+    }
+    this.#dispose()
+    if (shouldReport) {
+      reportUnhandledError(err)
     }
   }
 }
