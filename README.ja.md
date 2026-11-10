@@ -9,6 +9,13 @@ A state machine inspired by [XState](https://stately.ai/docs/xstate).
 - 迷子になりにくい記述
 
 
+## Installation
+
+```
+npm i small-state
+```
+
+
 ## FSM（Finite State Machine / 有限ステートマシン）とは
 
 有限個の状態と、状態間の遷移を定義するモデル。
@@ -237,8 +244,26 @@ idle 内で LOGIN_SUCCESS を受け取ると、定義に従い "loggedIn" ステ
     - 'notStarted' - まだ .start() されていない。
     - 'active' - .start() され、稼働している。
     - 'stopped' - .stop() され、停止している。
-    - 'done' - 最終状態に入り完了し、停止した。
+    - 'done' - 最終状態に入り完了し、正常停止した。
     - 'error' - エラーで停止した。
+  - `type Runtime<M extends AnyMachine>`
+  - `type Snapshot<M extends AnyMachine>` - Runtime の getSnapshot の項参照。
+
+### 補助関数
+
+- `isMachine(v: unknown): v is AnyMachine` - 引数がマシンかどうかを判定。
+- `isRuntime(v: unknown): v is Runtime<AnyMachine>` - 引数がランタイムかどうかを判定。
+- `defServiceFn(serviceFn: ServiceFn): ServiceFn`
+  - サービス関数を定義する。
+  - マシン外部でサービス関数を定義するときか、invoke に直接関数を渡すときに裸の関数だと型推論が崩れてしまうが、この関数でラップすることで型を通すことができる。
+- `waitFor<R extends Runtime<any>>(runtime, cond, options?): Promise<SnapshotFrom<R>>` - 渡した runtime が条件を満たすまで待機する。
+
+
+### メイン関数
+
+- `makeMachine(config, states): Machine` - マシンを作る。
+- `makeRuntime(machine, option?): Runtime` - マシンを実際に動かすランタイムを作る。
+
 
 ### 予約されているイベントタイプ
 
@@ -253,16 +278,6 @@ idle 内で LOGIN_SUCCESS を受け取ると、定義に従い "loggedIn" ステ
   - `{type: ':done:', output: unknown}` - そのサービスが正常終了したときに発火する
   - `{type: ':error:', error: unknown}` - そのサービスが異常狩猟したときに発火する
 
-### 補助関数
-
-- `defServiceFn(serviceFn): ServiceFn` - サービス関数を定義する。
-  - マシン外部でサービス関数を定義するときか、invoke に直接関数を渡すときに裸の関数だと型推論が崩れてしまうが、この関数でラップすることで型を通すことができる。
-- `waitFor<RT extends Runtime<any>>(runtime, cond, options?): Promise<SnapshotFrom<RT>>` - 渡した runtime が条件を満たすまで待機する。
-
-### メイン関数
-
-- `makeMachine(config, states): Machine` - マシンを作る。
-- `makeRuntime(machine, option?): Runtime` - マシンを実際に動かすランタイムを作る。
 
 ### `makeMachine(config: MachineConfig, defineStates: (tools)=>Record<string, StateDefinition>): Machine`
 
@@ -473,7 +488,8 @@ Runtime は以下のメンバーを持つ:
     - `output: O | undefined` - ランタイムが最終状態に入るまでは undefined。最終状態に入ったとき計算され結果がここに設定される。
     - `error: unknown` - エラーが生じてランタイムが停止したときにそのエラー内容が入る。それまでは undefined。
     - `_children` - デバッグ用。業務では使用しないのが望ましい。キーにサービス名、値に invoke などで起動中のサービスが入る。subKey を設定して起動している場合、キーは `${serviceName}:${subKey}` になる。
-  - 怠惰のために runtime から直接プロパティでsnapshot を参照できる getter が用意されている。以下のものが設定されている。
+    - `_runtime` - このスナップショットを作ったランタイム自身。
+  - 怠惰のために runtime から直接プロパティでsnapshot を参照できる getter が用意されている。以下のものが設定されている:
     - states, stateValue, context, runtimeStatus, output
 - `subscribe(onSnapshot: ((current: Snapshot, prev: Snapshot)=>void)|undefined, onError?:(err:unknown)=>void): UnsubscribeFn`
   - snapshot が更新されるたびに呼ばれる観測関数を登録する。ただし第一引数の関数はエラーは監視しない。それは省略可能な第二引数の関数の役割である。
@@ -508,6 +524,7 @@ Runtime は以下のメンバーを持つ:
 |  | XState | small-state |
 | - | - | - |
 | パス区切り文字 | `.` | `/` |
+| ロジックを持つのは | マシン | ランタイム |
 | context 更新 | assign | update: action内引数 |
 | 子から親への通信 | sendParent | emit |
 | 親から子への通信に使うもの | actor id | service name (と subKey) |
@@ -545,5 +562,3 @@ Runtime は以下のメンバーを持つ:
 - parallel のインターフェースの改修
   - もう少し分かりやすく
   - 連続で入れ子にできないのを改善する
-- error 時に正しく捕捉しランタイムを "error" 状態にする
-- Runtime のエラーメッセージにマシン名を入れる。

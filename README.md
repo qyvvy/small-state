@@ -13,6 +13,13 @@ A state machine library inspired by [XState](https://stately.ai/docs/xstate).
 - Clean syntax that is hard to get lost in
 
 
+## Installation
+
+```
+npm i small-state
+```
+
+
 ## What is an FSM (Finite State Machine)?
 
 A Finite State Machine is a computational model defined by a finite number of states and transitions between those states.
@@ -243,8 +250,25 @@ Since `loggedIn` is defined as `null`, it acts as a final state. The machine sto
     - `'notStarted'` - `.start()` has not been called yet.
     - `'active'` - `.start()` has been called and the machine is running.
     - `'stopped'` - `.stop()` was called and execution is halted.
-    - `'done'` - The machine reached a final state and finished execution.
+    - `'done'` - Entered the final state, completed, and successfully stopped.
     - `'error'` - Execution stopped due to an error.
+  - `type Runtime<M AnyMachine extends>`
+  - `type Snapshot<M AnyMachine extends>` - Refer to the Runtime getSnapshot section.
+
+### Utility Functions
+
+- `isMachine(v: unknown): v is AnyMachine` - Determines whether the argument is a machine.
+- `isRuntime(v: unknown): v is Runtime<AnyMachine>` - Determines whether the argument is a runtime.
+- `defServiceFn(serviceFn): ServiceFn`
+  - Defines a service function.
+  - Passing plain functions directly to `invoke` or defining them outside a machine configuration might cause type inference to break. Wrapping them with `defServiceFn` preserves type inference.
+- `waitFor<R extends Runtime<any>>(runtime, cond, options?): Promise<SnapshotFrom<R>>` - Returns a Promise that resolves when the specified `runtime` satisfies `cond`.
+
+### Primary Functions
+
+- `makeMachine(config, states): Machine` - Creates a machine definition.
+- `makeRuntime(machine, option?): Runtime` - Creates an executable runtime instance for a machine.
+
 
 ### Reserved Event Types
 
@@ -258,17 +282,6 @@ The following event names are currently reserved:
 - Inside `invoke`
   - `{type: ':done:', output: unknown}` - Fires when the invoked service completes successfully.
   - `{type: ':error:', error: unknown}` - Fires when the invoked service terminates with an error.
-
-### Utility Functions
-
-- `defServiceFn(serviceFn): ServiceFn` - Defines a service function.
-  - Passing plain functions directly to `invoke` or defining them outside a machine configuration might cause type inference to break. Wrapping them with `defServiceFn` preserves type inference.
-- `waitFor<RT extends Runtime<any>>(runtime, cond, options?): Promise<SnapshotFrom<RT>>` - Returns a Promise that resolves when the specified `runtime` satisfies `cond`.
-
-### Primary Functions
-
-- `makeMachine(config, states): Machine` - Creates a machine definition.
-- `makeRuntime(machine, option?): Runtime` - Creates an executable runtime instance for a machine.
 
 ### `makeMachine(config: MachineConfig, defineStates: (tools)=>Record<string, StateDefinition>): Machine`
 
@@ -478,6 +491,7 @@ Runtime instances expose the following members:
     - `output: O | undefined` - Contains final execution output values when `runtimeStatus === 'done'`; `undefined` otherwise.
     - `error: unknown` - Contains error details if execution halted due to errors; `undefined` otherwise.
     - `_children` - Debugging member. Keyed by service name mapping to running service instances. When `subKey` is present, keys map as `${serviceName}:${subKey}`.
+    - `_runtime` - The runtime instance itself that generated this snapshot.
   - Direct shortcut getters exist on `runtime` instances for convenience:
     - `states`, `stateValue`, `context`, `runtimeStatus`, `output`
 - `subscribe(onSnapshot: ((current: Snapshot, prev: Snapshot)=>void)|undefined, onError?:(err:unknown)=>void): UnsubscribeFn`
@@ -513,6 +527,7 @@ Runtime instances expose the following members:
 | Feature / Behavior | XState | small-state |
 | - | - | - |
 | Path Delimiter | `.` | `/` |
+| Logic ownership | Machine | Runtime |
 | Context Updates | `assign` | `update` argument inside action handlers |
 | Child to Parent Messaging | `sendParent` | `emit` |
 | Parent to Child Messaging | actor id | service name (and optional `subKey`) |
@@ -550,5 +565,3 @@ The following features are not supported:
 - Refactor `parallel` interface structure
   - Improve clarity and usability
   - Support nested continuous parallel structures
-- Improve error handling to catch runtime errors reliably and set status to `"error"`
-- Include machine name strings in Runtime error messages
