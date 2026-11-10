@@ -1,11 +1,11 @@
 import type { Runtime } from '../runtime/Runtime'
 import type { SnapshotFrom } from '../runtime/r.types'
 
-export async function waitFor<RT extends Runtime<any>>(
-  runtime: RT,
-  cond: (snapshot: SnapshotFrom<RT>) => boolean,
+export async function waitFor<R extends Runtime<any>>(
+  runtime: R,
+  cond: (snapshot: SnapshotFrom<R>) => boolean,
   options?: { timeout?: number },
-): Promise<SnapshotFrom<RT>> {
+): Promise<SnapshotFrom<R>> {
   if (runtime.runtimeStatus === 'notStarted') {
     throw new Error(`RT"${runtime.id}" is not started.`)
   }
@@ -17,7 +17,7 @@ export async function waitFor<RT extends Runtime<any>>(
       done = true
       unsubscribe?.()
     }
-    const check = (snapshot: SnapshotFrom<RT>) => {
+    const check = (snapshot: SnapshotFrom<R>) => {
       if (!cond(snapshot)) return
       dispose()
       resolve(snapshot)
@@ -28,12 +28,12 @@ export async function waitFor<RT extends Runtime<any>>(
       reject(`waitFor: timeout of ${options.timeout} ms exceeded`)
     }, options.timeout)
 
-    check(runtime.getSnapshot() as SnapshotFrom<RT>)
+    check(runtime.getSnapshot() as SnapshotFrom<R>)
     if (done) {
       return
     }
     unsubscribe = runtime.subscribe((snapshot) => {
-      check(snapshot as SnapshotFrom<RT>)
+      check(snapshot as SnapshotFrom<R>)
     })
   })
 }

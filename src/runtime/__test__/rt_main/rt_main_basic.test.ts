@@ -21,7 +21,6 @@ describe('rt_main/basic', () => {
         },
       ],
     )
-    stoplightMachine
 
     test('1: start 前', async () => {
       const stoplightRt = makeRuntime(stoplightMachine)
