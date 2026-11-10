@@ -17,6 +17,7 @@ import type * as ark_normalized from './arktype/ark_normalized'
 import * as ark_stdef from './arktype/ark_stdef'
 import type {
   ActionFnParams,
+  AnyMachine,
   BuiltinEType,
   BuiltinSendableEvent,
   ChildDoneEBody,
@@ -55,8 +56,8 @@ type X_DefTypeRefluxer<
   A extends Record<string, Placeholder>,
   S extends ServiceRecord = ServiceRecord,
   Eb extends BuiltinEType = BuiltinEType,
-  R = unknown,
-> = () => R
+  Ret = unknown,
+> = () => Ret
 
 type X_DefineStatesTools = {
   on: typeof on
@@ -550,7 +551,14 @@ function x_parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateN
               internalEvents[`invoke/:error:[${suffixNum}]`] = {
                 cond: ({ path }: InternalEPayload) => path === _getPath(),
                 transitions: [
-                  { guards: [], actions: [({ e }) => { throw e.error }] },
+                  {
+                    guards: [],
+                    actions: [
+                      ({ e }) => {
+                        throw e.error
+                      },
+                    ],
+                  },
                 ],
               }
             }
@@ -886,6 +894,12 @@ function getDefinitionAndCatalog<
 
 export function defServiceFn<TFn extends ServiceFn>(fn: TFn) {
   return fn
+}
+
+export function isMachine(v: unknown): v is AnyMachine {
+  if (!(v && typeof v === 'object' && 'internal' in v)) return false
+  const { internal } = v
+  return !!(internal && typeof internal === 'object' && MachineSymbol in internal)
 }
 
 export function makeMachine<
