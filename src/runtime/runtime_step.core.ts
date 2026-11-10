@@ -279,7 +279,7 @@ export function readyAction<
   ExRaw extends E | BuiltinSendableEvent | SystemSendableEvent,
   Ex extends E | BuiltinSendableEvent = Exclude<ExRaw, SystemSendableEvent>,
 >(
-  origContext: C,
+  origContext: Readonly<C>,
   rawEvent: ExRaw,
   input: I,
   machineGuards: Machine<C, E, I, any, any, any, any, any, any>['internal']['guards'],

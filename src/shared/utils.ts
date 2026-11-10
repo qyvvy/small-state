@@ -21,7 +21,7 @@ export function reportUnhandledError(err: unknown) {
 // == object 関係 ==
 
 // NOTE: 元のオブジェクトそのものを freeze する。同一性 （===） は変わらない
-export function deepFreeze<T>(obj: T): Readonly<T> {
+export function deepFreeze<T>(obj: T) {
   if (obj === null || (typeof obj !== "object" && typeof obj !== "function")) {
     return obj
   }

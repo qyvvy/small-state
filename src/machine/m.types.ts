@@ -31,8 +31,12 @@ export type EmittableEvent = { type: string;[key: string]: any }
 export type StateName = string
 
 // type 以外のプロパティを持たない SendableEvent の型を抽出する
-export type PureETypeString<E extends SendableEvent> =
+type O_PureETypeString<E extends SendableEvent> =
   E extends unknown ? Exclude<keyof E, "type"> extends never ? E['type'] : never : any
+type O_InferMachineSendableEvent<M extends AnyMachine> = M extends Machine<any, infer E, any, any, any, any, any, any, any> ? E : never
+export type SendFnEvent<M extends AnyMachine> =
+  O_InferMachineSendableEvent<M> extends infer E extends SendableEvent ? E | O_PureETypeString<E> : never
+
 
 export type FnBaseParams<C extends MContext, Ex extends SendableEvent, I, Additional = unknown, Prm = any> = [
   arg: Expand<{ c: C; context: C; e: Ex; event: Ex; input: I } & Additional>,
@@ -99,7 +103,7 @@ export type UpdateFnParam<C extends MContext> = {
 }
 export type UpdateFn<C extends MContext> = (updates: UpdateFnParam<C>) => unknown
 
-type O_InferSendableEvent<S extends ServiceRecord[string]> =
+type O_InferServiceSendableEvent<S extends ServiceRecord[string]> =
   S extends Machine<any, infer E, any, any, any, any, any, any, any> ? E :
   S extends AnyFn
   ? (Parameters<S>[2] extends ListenFn<infer Er> ? Er : never)
@@ -111,11 +115,11 @@ export type SendToFn<
   <Sk extends keyof S>(
     serviceName: Sk,
     subKey: string | number,
-    event: O_InferSendableEvent<S[Sk]>
+    event: O_InferServiceSendableEvent<S[Sk]>
   ): void
   <Sk extends keyof S>(
     serviceName: Sk,
-    event: O_InferSendableEvent<S[Sk]>
+    event: O_InferServiceSendableEvent<S[Sk]>
   ): void
 }
 

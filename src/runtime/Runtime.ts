@@ -3,89 +3,87 @@ import type {
   BuiltinSendableEvent,
   DoneEBody,
   InternalEPayload,
-  MContext,
-  PureETypeString,
-  ServiceRecord,
+  Machine,
+  SendFnEvent,
   SystemSendableEvent,
 } from '../machine/m.types'
 import { ST_DELIM } from '../shared/constants'
 import type { Expand } from '../shared/general.types'
 import { defineFixedProperty, reportUnhandledError } from '../shared/utils'
 import { MailBox } from './MailBox'
-import type { Children, InferMInput, InferredMachineTypes, RuntimeOutbound, StateRoute } from './r.types'
+import type { Children, RuntimeOutbound, StateRoute } from './r.types'
 import { initRuntime, macrostep } from './runtime_step'
 import { readyAction } from './runtime_step.core'
 import { runtimeUtils } from './runtime_utils'
 
 export type RuntimeStatus = 'notStarted' | 'active' | 'stopped' | 'done' | 'error'
 
-export type Snapshot<C extends MContext, O, S extends ServiceRecord> = {
-  runtimeId: string
-  states: string[]
-  stateValue: string | string[] | undefined
-  context: Expand<X_RemovePrivateKeys<C>>
-  c: Expand<X_RemovePrivateKeys<C>>
-  runtimeStatus: RuntimeStatus
-  output: O | undefined
-  error: unknown
-  _children: Children<S>
-}
-
-type Subscriber<C extends MContext, O, S extends ServiceRecord> = {
-  onSnapshot?: (current: Expand<Snapshot<C, O, S>>, prev: Expand<Snapshot<C, O, S>>) => void
-  onError?: (err: unknown) => void
-}
-
-export type RuntimeOptions<I> = {
-  id?: string
-  input?: () => I
-}
+type C<M extends AnyMachine> = M extends Machine<infer C, any, any, any, any, any, any, any, any> ? C : never
+type E<M extends AnyMachine> = M extends Machine<any, infer E, any, any, any, any, any, any, any> ? E : never
+type I<M extends AnyMachine> = M extends Machine<any, any, infer I, any, any, any, any, any, any> ? I : never
+type EM<M extends AnyMachine> = M extends Machine<any, any, any, infer EM, any, any, any, any, any> ? EM : never
+type O<M extends AnyMachine> = M extends Machine<any, any, any, any, infer O, any, any, any, any> ? O : never
+type G<M extends AnyMachine> = M extends Machine<any, any, any, any, any, infer G, any, any, any> ? G : never
+type A<M extends AnyMachine> = M extends Machine<any, any, any, any, any, any, infer A, any, any> ? A : never
+type S<M extends AnyMachine> = M extends Machine<any, any, any, any, any, any, any, infer S, any> ? S : never
 
 type X_RemovePrivateKeys<T extends Record<string, unknown>> = {
   [K in keyof T as K extends `_${string}` ? never : K]: T[K]
 }
 
-export function makeRuntime<M extends AnyMachine>(
-  machine: M,
-  options?: RuntimeOptions<InferMInput<M>>,
-) {
+export type Snapshot<M extends AnyMachine> = {
+  runtimeId: string
+  states: string[]
+  stateValue: string | string[] | undefined
+  context: Expand<X_RemovePrivateKeys<C<M>>>
+  c: Expand<X_RemovePrivateKeys<C<M>>>
+  runtimeStatus: RuntimeStatus
+  output: O<M> | undefined
+  error: unknown
+  _children: Children<S<M>>
+  _runtime: Runtime<M>
+}
+
+type Subscriber<M extends AnyMachine> = {
+  onSnapshot?: (current: Expand<Snapshot<M>>, prev: Expand<Snapshot<M>>) => void
+  onError?: (err: unknown) => void
+}
+
+export function isRuntime(v: unknown): v is Runtime<AnyMachine> {
+  return v instanceof Runtime
+}
+
+export type RuntimeOptions<M extends AnyMachine> = {
+  id?: string
+  input?: () => I<M>
+}
+
+export function makeRuntime<M extends AnyMachine>(machine: M, options?: RuntimeOptions<M>) {
   const runtime = new Runtime(machine, options)
   return runtime
 }
 
-type C<Mt extends InferredMachineTypes<any>> = Mt['C']
-type E<Mt extends InferredMachineTypes<any>> = Mt['E']
-type I<Mt extends InferredMachineTypes<any>> = Mt['I']
-type EM<Mt extends InferredMachineTypes<any>> = Mt['EM']
-type O<Mt extends InferredMachineTypes<any>> = Mt['O']
-type G<Mt extends InferredMachineTypes<any>> = Mt['G']
-type A<Mt extends InferredMachineTypes<any>> = Mt['A']
-type S<Mt extends InferredMachineTypes<any>> = Mt['S']
-
-const STOP_EVENT = { type: 'system/stop' }
+const STOP_EVENT = { type: 'system/stop' as const }
 
 let idCounter = 0
-export class Runtime<
-  M extends AnyMachine,
-  Mt extends InferredMachineTypes<M> = InferredMachineTypes<M>,
-> {
+export class Runtime<M extends AnyMachine> {
   readonly id!: string
-  readonly machine!: Mt['M']
-  readonly #machineInternal!: Mt['M']['internal']
-  readonly #input!: I<Mt>
-  #realContext!: C<Mt>
+  readonly machine!: M
+  readonly #machineInternal!: M['internal']
+  readonly #input!: I<M>
+  #realContext!: Readonly<C<M>>
   #crrStates: StateRoute = []
-  #sentQueue: MailBox<E<Mt> | BuiltinSendableEvent, InternalEPayload> = new MailBox(this.#processSentEvent.bind(this))
+  #sentQueue: MailBox<E<M> | BuiltinSendableEvent | SystemSendableEvent, InternalEPayload> = new MailBox(this.#processSentEvent.bind(this))
   #enqueueEvent = this.#sentQueue.enqueue.bind(this.#sentQueue)
-  #outbound: RuntimeOutbound<E<Mt>, EM<Mt>, S<Mt>> = {
+  #outbound: RuntimeOutbound<E<M>, EM<M>, S<M>> = {
     id: '',
     enqueueEvent: this.#enqueueEvent,
     emit: this.#_emit.bind(this),
     children: {},
   }
-  #subscribers = new Set<Subscriber<C<Mt>, O<Mt>, S<Mt>>>()
-  #emittedListeners: Map<string, Set<(emittedEvent: EM<Mt>) => void>> = new Map()
-  #snapshot = {} as Snapshot<C<Mt>, O<Mt>, S<Mt>>
+  #subscribers = new Set<Subscriber<M>>()
+  #emittedListeners: Map<string, Set<(emittedEvent: EM<M>) => void>> = new Map()
+  #snapshot = {} as Snapshot<M>
 
   get states() {
     return this.#snapshot.states
@@ -106,23 +104,23 @@ export class Runtime<
     return this.#snapshot
   }
 
-  constructor(machine: M, { id, input }: RuntimeOptions<I<Mt>> = {}) {
+  constructor(machine: M, { id, input }: RuntimeOptions<I<M>> = {}) {
     defineFixedProperty(this, 'id', id || `${machine.name}:${idCounter++}`, {
       enumerable: true,
     })
     defineFixedProperty(this, 'machine', machine, { enumerable: true })
     this.#machineInternal = machine.internal
-    this.#input = input?.() as I<Mt>
+    this.#input = input?.() as I<M>
     this.#outbound.id = this.id
 
     const { initContext } = machine.internal
-    const context = initContext ? initContext(this.#input) : (null as any as C<Mt>)
+    const context = initContext ? initContext(this.#input) : (null as any as C<M>)
     this.#buildAndSetSnapshot(context, true, 'notStarted')()
   }
 
   subscribe(
-    onSnapshot: Subscriber<C<Mt>, O<Mt>, S<Mt>>['onSnapshot'],
-    onError?: Subscriber<C<Mt>, O<Mt>, S<Mt>>['onError']
+    onSnapshot: Subscriber<M>['onSnapshot'],
+    onError?: Subscriber<M>['onError'],
   ) {
     const subscriber = { onSnapshot, onError }
     this.#subscribers.add(subscriber)
@@ -136,13 +134,7 @@ export class Runtime<
 
     const result = (() => {
       try {
-        return initRuntime(
-          this.#realContext,
-          this.#input,
-          this.#crrStates,
-          this.#machineInternal,
-          this.#outbound,
-        )
+        return initRuntime(this.#realContext, this.#input, this.#crrStates, this.#machineInternal, this.#outbound)
       } catch (err) {
         this.#handleError(err)
       }
@@ -155,8 +147,8 @@ export class Runtime<
     return this
   }
 
-  send(event: E<Mt> | PureETypeString<E<Mt>>) {
-    const eventObj = (typeof event === 'string' ? { type: event } : event) as E<Mt>
+  send(event: SendFnEvent<M>) {
+    const eventObj = (typeof event === 'string' ? { type: event } : event) as E<M>
     if (this.#snapshot.runtimeStatus !== 'active') {
       console.warn(`RT"${this.id}"> Event "${eventObj.type}" was sent to non-active runtime: ${this.id}`)
       return this
@@ -173,20 +165,23 @@ export class Runtime<
     return this
   }
 
-  onEmitted(emittedEventType: EM<Mt>['type'], handler: (emittedEvent: EM<Mt>) => void) {
+  onEmitted(emittedEventType: EM<M>['type'], handler: (emittedEvent: EM<M>) => void) {
     let listeners = this.#emittedListeners.get(emittedEventType)
     if (!listeners) {
       listeners = new Set()
       this.#emittedListeners.set(emittedEventType, listeners)
     }
-    const handlerWrapper = (emittedEvent: EM<Mt>) => handler(emittedEvent)
+    const handlerWrapper = (emittedEvent: EM<M>) => handler(emittedEvent)
     listeners.add(handlerWrapper)
     return () => {
       listeners.delete(handlerWrapper)
     }
   }
 
-  #processSentEvent<Ex extends E<Mt> | BuiltinSendableEvent | SystemSendableEvent>(event: Ex, internalEPayload?: InternalEPayload) {
+  #processSentEvent<Ex extends E<M> | BuiltinSendableEvent | SystemSendableEvent>(
+    event: Ex,
+    internalEPayload?: InternalEPayload,
+  ) {
     if (event === STOP_EVENT) {
       this.#dispose()
       return this.#buildAndSetSnapshot(this.#realContext, false, 'stopped')()
@@ -194,7 +189,7 @@ export class Runtime<
     const result = (() => {
       try {
         const { guards, actions } = this.#machineInternal
-        const actionRunner = readyAction<C<Mt>, E<Mt>, I<Mt>, EM<Mt>, G<Mt>, A<Mt>, S<Mt>, Ex>(
+        const actionRunner = readyAction<C<M>, E<M>, I<M>, EM<M>, G<M>, A<M>, S<M>, Ex>(
           this.#realContext,
           event,
           this.#input,
@@ -236,9 +231,9 @@ export class Runtime<
     this.#emittedListeners.clear()
   }
 
-  #_emit(emittedEvent: EM<Mt>) {
+  #_emit(emittedEvent: EM<M>) {
     const listeners = this.#emittedListeners.get(emittedEvent.type)
-    const wildcardListener = this.#emittedListeners.get('*');
+    const wildcardListener = this.#emittedListeners.get('*')
     if (!(listeners || wildcardListener)) {
       return
     }
@@ -251,15 +246,11 @@ export class Runtime<
     }
   }
 
-  #buildAndSetSnapshot(newRealContext: C<Mt>, hasTransitioned: boolean, runtimeStatus?: RuntimeStatus) {
+  #buildAndSetSnapshot(newRealContext: Readonly<C<M>>, hasTransitioned: boolean, runtimeStatus?: RuntimeStatus) {
     const oldSnapshot = this.#snapshot
 
     const crrStates = this.#crrStates
-    const states = !hasTransitioned
-      ? oldSnapshot.states
-      : !crrStates.length
-        ? []
-        : makeStateList(this.#crrStates)
+    const states = !hasTransitioned ? oldSnapshot.states : !crrStates.length ? [] : makeStateList(this.#crrStates)
     let { context } = oldSnapshot
     const contextUpdated = newRealContext !== this.#realContext
     if (contextUpdated) {
@@ -269,11 +260,11 @@ export class Runtime<
         : Object.entries(newRealContext).reduce(
           (acc, [k, v]) => {
             if (!k.startsWith('_')) {
-              acc[k as keyof X_RemovePrivateKeys<C<Mt>>] = v
+              acc[k as keyof X_RemovePrivateKeys<C<M>>] = v
             }
             return acc
           },
-          {} as X_RemovePrivateKeys<C<Mt>>,
+          {} as X_RemovePrivateKeys<C<M>>,
         )
     }
 
@@ -282,7 +273,10 @@ export class Runtime<
         return
       }
       const { stateCatalog, output } = this.#machineInternal
-      const isCompleted = !!(doneEvent || states.length && states.every((stPath) => stateCatalog.get(stPath)?.def.final))
+      const isCompleted = !!(
+        doneEvent ||
+        (states.length && states.every((stPath) => stateCatalog.get(stPath)?.def.final))
+      )
 
       this.#snapshot = {
         runtimeId: this.id,
@@ -295,12 +289,20 @@ export class Runtime<
         runtimeStatus: isCompleted ? 'done' : runtimeStatus || oldSnapshot.runtimeStatus,
         output: !(isCompleted && output)
           ? undefined
-          : output(runtimeUtils.makeFnBaseParam(
-            newRealContext, (doneEvent || { type: ':done:', output: undefined }), this.#input
-          )),
+          : output(
+            runtimeUtils.makeFnBaseParam(
+              newRealContext,
+              doneEvent || { type: ':done:', output: undefined },
+              this.#input,
+            ),
+          ),
         error: undefined,
         _children: this.#outbound.children,
+        _runtime: this,
       }
+      Object.defineProperty(this.#snapshot, '_runtime', {
+        enumerable: false
+      })
 
       {
         const snapshot = this.#snapshot

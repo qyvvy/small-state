@@ -1,6 +1,6 @@
 {
   "name": "small-state",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "A state machine inspired by XState.",
   "author": "qyvvy",
   "license": "MIT",
@@ -27,7 +27,9 @@
     "dist",
     "THIRD_PARTY_LICENSES.md"
   ],
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "arktype": "^2.2.8"
   },
