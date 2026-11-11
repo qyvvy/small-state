@@ -150,7 +150,7 @@ export class Runtime<M extends AnyMachine> {
   send(event: SendFnEvent<M>) {
     const eventObj = (typeof event === 'string' ? { type: event } : event) as E<M>
     if (this.#snapshot.runtimeStatus !== 'active') {
-      console.warn(`RT"${this.id}"> Event "${eventObj.type}" was sent to non-active runtime: ${this.id}`)
+      console.warn(`RT"${this.id}"> Event "${eventObj.type}" was sent to non-active runtime.`)
       return this
     }
     this.#enqueueEvent(eventObj)

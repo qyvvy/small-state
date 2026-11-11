@@ -476,12 +476,12 @@ function x_parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateN
         // on(...)
         const [eType, _, transitions] = item
         if (Object.hasOwn(def.events, eType) || Object.hasOwn(def.internalEvents, eType)) {
-          throw new Error(`createMachine: Duplicate event definition for event "${eType}", at "${stateName}"[${i}]`)
+          throw new Error(`makeMachine: Duplicate event definition for event "${eType}", at "${stateName}"[${i}]`)
         }
         const mid = ensureArray(transitions!)
         if (!mid.length || mid.some((t) => !Object.keys(t).length)) {
           throw new Error(
-            `createMachine: on(eventType, config): Empty config is not allowed: on("${eType}", ${JSON.stringify(transitions)}), at "${stateName}"[${i}]`,
+            `makeMachine: on(eventType, config): Empty config is not allowed: on("${eType}", ${JSON.stringify(transitions)}), at "${stateName}"[${i}]`,
           )
         }
         const nTransitions = o_normalizeTransitions(mid)
@@ -527,13 +527,13 @@ function x_parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateN
               const transitions = ensureArray(ivkTransitions!)
               if (!transitions.length || transitions.some((t) => !Object.keys(t).length)) {
                 throw new Error(
-                  `createMachine: on(eventType, config): The 'config' argument is required, at state:"${stateName}"[${i}] > invoke events[${j}] event:"${ivkEType}"`,
+                  `makeMachine: on(eventType, config): The 'config' argument is required, at state:"${stateName}"[${i}] > invoke events[${j}] event:"${ivkEType}"`,
                 )
               }
               const eType: `invoke/${string}[${number}]` = `invoke/${ivkEType}[${suffixNum}]`
               if (Object.hasOwn(internalEvents, eType)) {
                 throw new Error(
-                  `createMachine: Duplicate event definition for event "${ivkEType}", at state:"${stateName}"[${i}] > invoke events[${j}]`,
+                  `makeMachine: Duplicate event definition for event "${ivkEType}", at state:"${stateName}"[${i}] > invoke events[${j}]`,
                 )
               }
               internalEvents[eType] = {
@@ -581,7 +581,7 @@ function x_parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateN
         const subStDict = item[1] as Exclude<(typeof item)[1], (...args: any[]) => unknown>
         if (sub) {
           throw new Error(
-            `createMachine: Duplicated subStates: at "${stateName}"[${i}] { ${Object.keys(
+            `makeMachine: Duplicated subStates: at "${stateName}"[${i}] { ${Object.keys(
               'stateOf' in subStDict ? subStDict.stateOf : {},
             )
               .map((el) => `${el}:...`)
@@ -592,7 +592,7 @@ function x_parseStDefItems(items: typeof ark_stdef.StateDefinition.infer, stateN
         break
       }
       default:
-        throw new Error(`createMachine: Unexpected array[0] type: ${JSON.stringify(item?.[0])}`)
+        throw new Error(`makeMachine: Unexpected array[0] type: ${JSON.stringify(item?.[0])}`)
     }
   }
   return { def, sub }
@@ -604,7 +604,7 @@ function o_normalizeStates<const D extends Record<string, StateDefinition<any, a
   return Object.entries(stateDefOf).reduce(
     (acc, [stKey, stDefs]: [keyof D & string, unknown], i) => {
       if (stKey.includes(ST_DELIM)) {
-        throw new Error(`createMachine: State names cannot contain the character "${ST_DELIM}": "${stKey}"`)
+        throw new Error(`makeMachine: State names cannot contain the character "${ST_DELIM}": "${stKey}"`)
       } else if (Array.isArray(stDefs) || stDefs == null) {
         try {
           const items = ark_stdef.StateDefinition.assert(stDefs)
@@ -612,12 +612,12 @@ function o_normalizeStates<const D extends Record<string, StateDefinition<any, a
           acc[stKey] = { def, sub } as any
         } catch (err) {
           if (err instanceof Error) {
-            throw new Error(`createMachine:(at state "${stKey}") ${err.name}: ${err.message}`)
+            throw new Error(`makeMachine:(at state "${stKey}") ${err.name}: ${err.message}`)
           }
         }
       } else {
         throw new Error(
-          `createMachine: Invalid state definition for state "${String(stKey)}". Expected an array but got ${typeof stDefs}.`,
+          `makeMachine: Invalid state definition for state "${String(stKey)}". Expected an array but got ${typeof stDefs}.`,
         )
       }
       return acc
@@ -642,7 +642,7 @@ function transformNormalizedDefinition<
       : initialState &&
         assertOrThrow(
           Object.hasOwn(stateDefOf, initialState),
-          `createMachine: Invalid initialState: "${initialState}"`,
+          `makeMachine: Invalid initialState: "${initialState}"`,
         )
         ? initialState
         : firstState
@@ -675,7 +675,7 @@ function transformParallelNormalizedDefinition<
       Object.entries(parallelDefinition).map(([regionName, rawDefinition]) => {
         if (regionName.includes(ST_DELIM)) {
           throw new Error(
-            `createMachine: Parallel region state names cannot contain the character "${ST_DELIM}": "${regionName}"`,
+            `makeMachine: Parallel region state names cannot contain the character "${ST_DELIM}": "${regionName}"`,
           )
         }
         const len = rawDefinition.length
@@ -770,11 +770,11 @@ function x_readyToValidateTransitionAndSetFullTo(
       }
       const tFullPath = o_getTransitionFullPath(to, statePath, pPath, stateCatalog)
       if (!tFullPath) {
-        throw new Error(`createMachine: Invalid transition "${to}" in state "${statePath || '/'}" (on:"${eType}").`)
+        throw new Error(`makeMachine: Invalid transition "${to}" in state "${statePath || '/'}" (on:"${eType}").`)
       }
       if (ancestorRegion && !tFullPath.startsWith(ancestorRegion) && tFullPath.startsWith(parallelRoot!)) {
         throw new Error(
-          `createMachine: Transitions in a parallel state cannot target a different region: on('${eType}', ['${to}', ...]) in state "${statePath || '/'}".`,
+          `makeMachine: Transitions in a parallel state cannot target a different region: on('${eType}', ['${to}', ...]) in state "${statePath || '/'}".`,
         )
       }
       transition.fullTo = tFullPath
@@ -829,7 +829,7 @@ function getDefinitionAndCatalog<
   {
     const configOut = ark_m_config.MachineConfig(config)
     if (configOut instanceof arkType.errors) {
-      throw new Error(`createMachine: Invalid machine config: ${configOut.summary}`)
+      throw new Error(`makeMachine: Invalid machine config: ${configOut.summary}`)
     }
   }
   const rawDefinition = defineStates({
@@ -847,10 +847,10 @@ function getDefinitionAndCatalog<
   {
     const dType = stateDefDict === null ? 'null' : typeof stateDefDict
     if (dType !== 'object') {
-      throw new Error(`createMachine: Invalid state definition: Expected an object but got ${dType}.`)
+      throw new Error(`makeMachine: Invalid state definition: Expected an object but got ${dType}.`)
     }
     if (Object.keys(stateDefDict).length === 0) {
-      throw new Error(`createMachine: No states in machine definition.`)
+      throw new Error(`makeMachine: No states in machine definition.`)
     }
   }
 
