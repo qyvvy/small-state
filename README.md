@@ -1,6 +1,6 @@
 # small-state
 
-This README.md was automatically translated from the Japanese version and may contain inaccuracies. For accurate information, please refer to [the Japanese version](https://github.com/qyvvy/small-state/blob/dev/README.ja.md).
+This README.md was automatically translated from the Japanese version and may contain inaccuracies. For accurate information, please refer to [the Japanese version](https://github.com/qyvvy/small-state/blob/main/README.ja.md).
 
 ---
 
@@ -69,15 +69,15 @@ const loginMachine = makeMachine(
 This state machine has three states: `idle`, `locked`, and `loggedIn`.<br>
 When unspecified, the initial state defaults to the first defined state (in this case, `idle`).
 
-To execute this machine, pass it to `createRuntime`.
+To execute this machine, pass it to `makeRuntime`.
 
 ```ts
-import { createRuntime, type Runtime } from 'small-state'
+import { makeRuntime, type Runtime } from 'small-state'
 
 const logRuntime = (idx: number, { runtimeStatus, stateValue, context }: Runtime<any>) =>
   console.log(idx, { runtimeStatus, stateValue, context })
 
-const loginRt = createRuntime(loginMachine)
+const loginRt = makeRuntime(loginMachine)
 logRuntime(0, loginRt)
 /*
   0 {

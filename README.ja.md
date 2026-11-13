@@ -67,12 +67,12 @@ const loginMachine = makeMachine(
 このマシンを動かすには `makeRuntime` にマシンを渡す。
 
 ```ts
-import { createRuntime, type Runtime } from 'small-state'
+import { makeRuntime, type Runtime } from 'small-state'
 
 const logRuntime = (idx: number, { runtimeStatus, stateValue, context }: Runtime<any>) =>
   console.log(idx, { runtimeStatus, stateValue, context })
 
-const loginRt = createRuntime(loginMachine)
+const loginRt = makeRuntime(loginMachine)
 logRuntime(0, loginRt)
 /*
   0 {
