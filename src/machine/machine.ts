@@ -770,7 +770,7 @@ function x_readyToValidateTransitionAndSetFullTo(
       }
       const tFullPath = o_getTransitionFullPath(to, statePath, pPath, stateCatalog)
       if (!tFullPath) {
-        throw new Error(`makeMachine: Invalid transition "${to}" in state "${statePath || '/'}" (on:"${eType}").`)
+        throw new Error(`makeMachine: Invalid transition "${to}" in state "${statePath || '/'}" on("${eType}", ...).`)
       }
       if (ancestorRegion && !tFullPath.startsWith(ancestorRegion) && tFullPath.startsWith(parallelRoot!)) {
         throw new Error(
