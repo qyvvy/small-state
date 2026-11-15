@@ -364,7 +364,11 @@ Since `loggedIn` is defined as `null`, it acts as a final state. The machine sto
 - `defServiceFn(serviceFn): ServiceFn`
   - Defines a service function.
   - Passing plain functions directly to `invoke` or defining them outside a machine configuration might cause type inference to break. Wrapping them with `defServiceFn` preserves type inference.
-- `waitFor<R extends Runtime<any>>(runtime, cond, options?): Promise<SnapshotFrom<R>>` - Returns a Promise that resolves when the specified `runtime` satisfies `cond`.
+- `waitFor(runtime, cond, options?): Promise<Snapshot>` - Waits until the specified `runtime` satisfies the given condition, then returns the `snapshot` captured when the wait completes.
+  - `runtime` - The target runtime.
+  - `cond: (snapshot: Snapshot) => boolean` - Waits until this function returns `true`.
+  - `options: { timeout?: number }`
+    - `timeout` - Stops waiting after the specified number of milliseconds has elapsed.
 
 ### Primary Functions
 
