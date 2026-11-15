@@ -73,7 +73,8 @@ export class Runtime<M extends AnyMachine> {
   readonly #input!: I<M>
   #realContext!: Readonly<C<M>>
   #crrStates: StateRoute = []
-  #sentQueue: MailBox<E<M> | BuiltinSendableEvent | SystemSendableEvent, InternalEPayload> = new MailBox(this.#processSentEvent.bind(this))
+  #sentQueue: MailBox<E<M> | BuiltinSendableEvent | SystemSendableEvent, InternalEPayload> =
+    new MailBox(this.#processSentEvent.bind(this))
   #enqueueEvent = this.#sentQueue.enqueue.bind(this.#sentQueue)
   #outbound: RuntimeOutbound<E<M>, EM<M>, S<M>> = {
     id: '',
@@ -147,7 +148,7 @@ export class Runtime<M extends AnyMachine> {
     return this
   }
 
-  send(event: SendFnEvent<M>) {
+  #_send(event: SendFnEvent<M>) {
     const eventObj = (typeof event === 'string' ? { type: event } : event) as E<M>
     if (this.#snapshot.runtimeStatus !== 'active') {
       console.warn(`RT"${this.id}"> Event "${eventObj.type}" was sent to non-active runtime.`)
@@ -156,6 +157,7 @@ export class Runtime<M extends AnyMachine> {
     this.#enqueueEvent(eventObj)
     return this
   }
+  send = this.#_send.bind(this)
 
   stop() {
     if (this.#snapshot.runtimeStatus !== 'active') return this
