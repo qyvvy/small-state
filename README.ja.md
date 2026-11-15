@@ -358,7 +358,11 @@ idle 内で LOGIN_SUCCESS を受け取ると、定義に従い "loggedIn" ステ
 - `defServiceFn(serviceFn: ServiceFn): ServiceFn`
   - サービス関数を定義する。
   - マシン外部でサービス関数を定義するときか、invoke に直接関数を渡すときに裸の関数だと型推論が崩れてしまうが、この関数でラップすることで型を通すことができる。
-- `waitFor<R extends Runtime<any>>(runtime, cond, options?): Promise<SnapshotFrom<R>>` - 渡した runtime が条件を満たすまで待機する。
+- `waitFor(runtime, cond, options?): Promise<Snapshot>` - 渡した runtime が条件を満たすまで待機する。待機終了時の snapshot を返す。
+  - `runtime` - 対象のランタイム。
+  - `cond: (snapshot: Snapshot) => boolean` - この関数が true を返すまで待機させる。
+  - `options: { timeout?: number }`
+    - `timeout` - ここで指定したミリ秒を経過したら待機をやめる。
 
 
 ### メイン関数
