@@ -26,6 +26,3 @@ export type RuntimeOutbound<E extends SendableEvent, EM extends EmittableEvent, 
   emit: (eventToEmit: EM) => void
   children: Children<S>
 }
-
-export type SnapshotFrom<R extends Runtime<any>> =
-  R extends Runtime<infer M> ? Snapshot<M> : never

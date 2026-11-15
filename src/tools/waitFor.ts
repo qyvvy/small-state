@@ -1,11 +1,11 @@
-import type { Runtime } from '../runtime/Runtime'
-import type { SnapshotFrom } from '../runtime/r.types'
+import type { AnyMachine } from '../machine/m.types'
+import type { Runtime, Snapshot } from '../runtime/Runtime'
 
-export async function waitFor<R extends Runtime<any>>(
-  runtime: R,
-  cond: (snapshot: SnapshotFrom<R>) => boolean,
+export async function waitFor<M extends AnyMachine>(
+  runtime: Runtime<M>,
+  cond: (snapshot: Snapshot<M>) => boolean,
   options?: { timeout?: number },
-): Promise<SnapshotFrom<R>> {
+): Promise<Snapshot<M>> {
   if (runtime.runtimeStatus === 'notStarted') {
     throw new Error(`RT"${runtime.id}" is not started.`)
   }
@@ -17,23 +17,25 @@ export async function waitFor<R extends Runtime<any>>(
       done = true
       unsubscribe?.()
     }
-    const check = (snapshot: SnapshotFrom<R>) => {
+    const check = (snapshot: Snapshot<M>) => {
       if (!cond(snapshot)) return
       dispose()
       resolve(snapshot)
     }
 
-    const timeoutId = !options?.timeout ? undefined : setTimeout(() => {
-      dispose()
-      reject(`waitFor: timeout of ${options.timeout} ms exceeded`)
-    }, options.timeout)
+    const timeoutId = !options?.timeout
+      ? undefined
+      : setTimeout(() => {
+        dispose()
+        reject(`waitFor: timeout of ${options.timeout} ms exceeded`)
+      }, options.timeout)
 
-    check(runtime.getSnapshot() as SnapshotFrom<R>)
+    check(runtime.getSnapshot() as Snapshot<M>)
     if (done) {
       return
     }
     unsubscribe = runtime.subscribe((snapshot) => {
-      check(snapshot as SnapshotFrom<R>)
+      check(snapshot as Snapshot<M>)
     })
   })
 }
