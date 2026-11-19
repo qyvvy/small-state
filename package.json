@@ -1,11 +1,16 @@
 {
   "name": "small-state",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "description": "A state machine inspired by XState.",
   "author": "qyvvy",
   "license": "MIT",
   "repository": "github:qyvvy/small-state",
-  "keywords": ["state machine", "fsm", "state", "xstate"],
+  "keywords": [
+    "state machine",
+    "fsm",
+    "state",
+    "xstate"
+  ],
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",

@@ -2,6 +2,7 @@ import type {
   AnyMachine,
   BuiltinSendableEvent,
   DoneEBody,
+  EmittableEvent,
   InternalEPayload,
   Machine,
   SendFnEvent,
@@ -65,6 +66,12 @@ export function makeRuntime<M extends AnyMachine>(machine: M, options?: RuntimeO
 
 const STOP_EVENT = { type: 'system/stop' as const }
 
+type O_ExtractEvent<EM extends EmittableEvent, EMt extends EM['type']> = EM extends { type: EMt }
+  ? EM
+  : EMt extends EM['type']
+  ? EM
+  : never
+
 let idCounter = 0
 export class Runtime<M extends AnyMachine> {
   readonly id!: string
@@ -73,8 +80,9 @@ export class Runtime<M extends AnyMachine> {
   readonly #input!: I<M>
   #realContext!: Readonly<C<M>>
   #crrStates: StateRoute = []
-  #sentQueue: MailBox<E<M> | BuiltinSendableEvent | SystemSendableEvent, InternalEPayload> =
-    new MailBox(this.#processSentEvent.bind(this))
+  #sentQueue: MailBox<E<M> | BuiltinSendableEvent | SystemSendableEvent, InternalEPayload> = new MailBox(
+    this.#processSentEvent.bind(this),
+  )
   #enqueueEvent = this.#sentQueue.enqueue.bind(this.#sentQueue)
   #outbound: RuntimeOutbound<E<M>, EM<M>, S<M>> = {
     id: '',
@@ -119,10 +127,7 @@ export class Runtime<M extends AnyMachine> {
     this.#buildAndSetSnapshot(context, true, 'notStarted')()
   }
 
-  subscribe(
-    onSnapshot: Subscriber<M>['onSnapshot'],
-    onError?: Subscriber<M>['onError'],
-  ) {
+  subscribe(onSnapshot: Subscriber<M>['onSnapshot'], onError?: Subscriber<M>['onError']) {
     const subscriber = { onSnapshot, onError }
     this.#subscribers.add(subscriber)
     return () => {
@@ -167,13 +172,16 @@ export class Runtime<M extends AnyMachine> {
     return this
   }
 
-  onEmitted(emittedEventType: EM<M>['type'], handler: (emittedEvent: EM<M>) => void) {
+  onEmitted<EMt extends EM<M>['type'], EMx extends O_ExtractEvent<EM<M>, EMt>>(
+    emittedEventType: EMt,
+    handler: (emittedEvent: EMx) => void,
+  ) {
     let listeners = this.#emittedListeners.get(emittedEventType)
     if (!listeners) {
       listeners = new Set()
       this.#emittedListeners.set(emittedEventType, listeners)
     }
-    const handlerWrapper = (emittedEvent: EM<M>) => handler(emittedEvent)
+    const handlerWrapper = (emittedEvent: EMx) => handler(emittedEvent)
     listeners.add(handlerWrapper)
     return () => {
       listeners.delete(handlerWrapper)
@@ -303,7 +311,7 @@ export class Runtime<M extends AnyMachine> {
         _runtime: this,
       }
       Object.defineProperty(this.#snapshot, '_runtime', {
-        enumerable: false
+        enumerable: false,
       })
 
       {
