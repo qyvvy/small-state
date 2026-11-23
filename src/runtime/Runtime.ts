@@ -136,7 +136,10 @@ export class Runtime<M extends AnyMachine> {
   }
 
   start() {
-    if (this.runtimeStatus !== 'notStarted') return this
+    if (this.runtimeStatus !== 'notStarted') {
+      console.warn(`RT"${this.id}"> Runtime cannot restart. runtimeStatus:"${this.#snapshot.runtimeStatus}"`)
+      return this
+    }
 
     const result = (() => {
       try {
@@ -156,7 +159,7 @@ export class Runtime<M extends AnyMachine> {
   #_send(event: SendFnEvent<M>) {
     const eventObj = (typeof event === 'string' ? { type: event } : event) as E<M>
     if (this.#snapshot.runtimeStatus !== 'active') {
-      console.warn(`RT"${this.id}"> Event "${eventObj.type}" was sent to non-active runtime.`)
+      console.warn(`RT"${this.id}"> Event "${eventObj.type}" was sent to non-active runtime. runtimeStatus:"${this.#snapshot.runtimeStatus}"`)
       return this
     }
     this.#enqueueEvent(eventObj)
