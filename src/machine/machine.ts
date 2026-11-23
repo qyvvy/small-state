@@ -640,10 +640,7 @@ function transformNormalizedDefinition<
     !firstState
       ? undefined
       : initialState &&
-        assertOrThrow(
-          Object.hasOwn(stateDefOf, initialState),
-          `makeMachine: Invalid initialState: "${initialState}"`,
-        )
+        assertOrThrow(Object.hasOwn(stateDefOf, initialState), `makeMachine: Invalid initialState: "${initialState}"`)
         ? initialState
         : firstState
   ) as Initial extends string ? Initial : string
