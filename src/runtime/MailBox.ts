@@ -53,6 +53,7 @@ export class MailBox<V, P extends Record<string, any> = Record<string, any>> {
     this.#last = null
   }
 
+  // 使用していない
   async #_flushAsync() {
     while (this.#current) {
       const { value, payload } = this.#current

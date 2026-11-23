@@ -33,7 +33,7 @@ import type {
 import { SystemEventSymbol } from '../machine/m.types'
 import { ST_DELIM } from '../shared/constants'
 import type { Placeholder, RecursiveRecord, Values } from '../shared/general.types'
-import { deepFreeze, parentPathOf, splitStPath } from '../shared/utils'
+import { parentPathOf, shallowFreeze, splitStPath } from '../shared/utils'
 import { makeRuntime } from './Runtime'
 import type { RuntimeOutbound, StateRoute } from './r.types'
 import {
@@ -288,7 +288,7 @@ export function readyAction<
 ) {
   const event = o_unwrapSystemEvent(rawEvent) as Ex
   const { emit } = rtOutbound
-  let context = deepFreeze(origContext)
+  let context = origContext
   let updateApplications: UpdateFnParam<C>[] = []
   let enqActions: {
     fn: (...arg: LimitedActionFnParams<C, Ex, I, EM>) => unknown
@@ -303,6 +303,9 @@ export function readyAction<
   }
 
   function applyUpdate() {
+    if (!updateApplications.length) {
+      return
+    }
     for (const updates of updateApplications) {
       const partial = Object.entries(updates).reduce(
         (acc, [key, val]) => {
@@ -313,10 +316,7 @@ export function readyAction<
       )
       context = { ...context, ...partial }
     }
-    if (!updateApplications.length) {
-      return
-    }
-    context = deepFreeze(context)
+    context = shallowFreeze(context)
     updateApplications = []
   }
 
@@ -718,14 +718,15 @@ export function launchInvocations<E extends SendableEvent, S extends ServiceReco
     if (rtOutbound.children[childKey]) {
       throw new Error(`RT"${rtOutbound.id}"> Service with ID '${childKey}' is already running.`)
     }
-    const onDone = (output: unknown) => enqueueEvent(
-      {
-        type: `invoke/:done:[${i}]` as const,
-        payload: { type: ':done:', output },
-        [SystemEventSymbol]: true,
-      },
-      { path },
-    )
+    const onDone = (output: unknown) =>
+      enqueueEvent(
+        {
+          type: `invoke/:done:[${i}]` as const,
+          payload: { type: ':done:', output },
+          [SystemEventSymbol]: true,
+        },
+        { path },
+      )
     const onError = (error: unknown) => {
       enqueueEvent(
         {
@@ -782,7 +783,9 @@ export function launchInvocations<E extends SendableEvent, S extends ServiceReco
         }
         type Listener = (event: SendableEvent) => void
         const listeners = new Set<Listener>()
-        const listen = (listener: Listener) => { listeners.add(listener) }
+        const listen = (listener: Listener) => {
+          listeners.add(listener)
+        }
         const child = {
           send(event: SendableEvent) {
             listeners.forEach((listener) => listener(event))
@@ -790,7 +793,7 @@ export function launchInvocations<E extends SendableEvent, S extends ServiceReco
           stop() {
             abortController.abort()
             listeners.clear()
-          }
+          },
         }
         rtOutbound.children = { ...rtOutbound.children, [childKey]: child }
         const result = (() => {
