@@ -321,7 +321,8 @@ idle 内で LOGIN_SUCCESS を受け取ると、定義に従い "loggedIn" ステ
   - `type AnyMachine = Machine<any, any, any, any, any, any, any, any, any>`
     - 任意のマシン
   - `type MContext = Record<string, any>`
-    - context。マシン内部に状態として持つことができる値。ちなみに `_` で始まるプロパティ名はマシン内部用となり外部に公開されない。
+    - context。マシン内部に状態として持つことができる値。
+    - ちなみに `_` で始まるプロパティ名はマシン内部用となり外部に公開されない。snapshot では `_` から始まるプロパティは取り除かれる。
   - `type SendableEvent = { type: string;[key: string]: any }`
     - 主に外部から runtime.send や sendTo を通じてステートマシンに送られるイベント。
   - `type EmittableEvent = { type: string;[key: string]: any }`
@@ -523,6 +524,7 @@ idle 内で LOGIN_SUCCESS を受け取ると、定義に従い "loggedIn" ステ
   - `context`
     - マシンの現在のコンテキストの値。マシンの initContext を設定していないと null になる。
     - イミュータブルであり、変更は許されていない。更新するときには ActionFn の update 関数を通して更新すること。
+      - 直接代入を防ぐために深さ1 の要素（オブジェクトのプロパティ）まで Object.freeze している。深さ1 のオブジェクトを update のために編集したいのならスプレッド構文などで複製すること。
   - `c` - context のショートハンド。使用頻度が高いので怠惰のために用意しただけで context と内容は同じ。
   - `event` - 現在のアクションのきっかけとなったイベント
   - `e` - event のショートハンド。使用頻度が高いので怠惰のために用意しただけで event と内容は同じ。
@@ -589,7 +591,7 @@ Runtime は以下のメンバーを持つ:
     - `states: string[]` - 現在のステートのフルパスのリスト。現在ステートが parallel な子ステートを持つ場合、配列の長さは 2 以上になることがある。そうでないときには配列の長さは 1 である。
       - 他のステートマシンと違って、ステート名の前に '/' が付き、階層は '/' で区切られる。
     - `stateValue: string | string[] | undefined` - parallel を扱わないマシン定義のために用意されたショートカット。states の長さが 1 のときには最初のステートパスを返す。そうでないときには states をそのまま返す。
-    - `context: PrivateKeyRemovedContext` - コンテキスト。ただし、マシン内部で context を参照するときと違い、`_` から始まるプロパティは公開されない。
+    - `context: PrivateKeyRemovedContext` - コンテキスト。ただし、マシン内部で context を参照するときと違い、`_` から始まるプロパティは公開されない。deepFreeze されている。
     - `c` - 怠惰のために用意された context のショートハンド。中身は context と同じ。
     - `output: O | undefined` - ランタイムが最終状態に入るまでは undefined。最終状態に入ったとき計算され結果がここに設定される。
     - `error: unknown` - エラーが生じてランタイムが停止したときにそのエラー内容が入る。それまでは undefined。

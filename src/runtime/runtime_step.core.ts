@@ -33,7 +33,7 @@ import type {
 import { SystemEventSymbol } from '../machine/m.types'
 import { ST_DELIM } from '../shared/constants'
 import type { Placeholder, RecursiveRecord, Values } from '../shared/general.types'
-import { deepFreeze, parentPathOf, splitStPath } from '../shared/utils'
+import { parentPathOf, shallowFreeze, splitStPath } from '../shared/utils'
 import { makeRuntime } from './Runtime'
 import type { RuntimeOutbound, StateRoute } from './r.types'
 import {
@@ -288,7 +288,7 @@ export function readyAction<
 ) {
   const event = o_unwrapSystemEvent(rawEvent) as Ex
   const { emit } = rtOutbound
-  let context = deepFreeze(origContext)
+  let context = origContext
   let updateApplications: UpdateFnParam<C>[] = []
   let enqActions: {
     fn: (...arg: LimitedActionFnParams<C, Ex, I, EM>) => unknown
@@ -316,7 +316,7 @@ export function readyAction<
     if (!updateApplications.length) {
       return
     }
-    context = deepFreeze(context)
+    context = shallowFreeze(context)
     updateApplications = []
   }
 

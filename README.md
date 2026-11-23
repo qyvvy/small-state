@@ -327,7 +327,8 @@ Since `loggedIn` is defined as `null`, it acts as a final state. The machine sto
   - `type AnyMachine = Machine<any, any, any, any, any, any, any, any, any>`
     - Any machine instance.
   - `type MContext = Record<string, any>`
-    - Context object representing state variables held inside the machine. Properties starting with `_` are internal to the machine and hidden from external visibility.
+    - Context object representing state variables held inside the machine.
+    - Properties starting with `_` are internal to the machine and hidden from external visibility. Properties starting with `_` are also removed from snapshots.
   - `type SendableEvent = { type: string; [key: string]: any }`
     - Events sent to the state machine from external callers via `runtime.send` or `sendTo`.
   - `type EmittableEvent = { type: string; [key: string]: any }`
@@ -527,6 +528,7 @@ Most callback functions receive an object matching `CommonArgs` as their first p
   - `context`
     - Current context value of the machine (`null` if `initContext` was omitted).
     - Immutable object; direct mutations are disallowed. Use `ActionFn`'s `update` function to modify context fields.
+      - To prevent direct assignment, the properties at the first level (object properties) are frozen using `Object.freeze`. If you need to modify a first-level object as part of an update, create a copy using the spread syntax or a similar approach.
   - `c` - Shorthand property for `context`. Provided for convenience.
   - `event` - The event object that triggered the current action execution.
   - `e` - Shorthand property for `event`. Provided for convenience.
@@ -592,7 +594,7 @@ Runtime instances expose the following members:
     - `states: string[]` - Full path strings of active state values. Returns arrays with length > 1 if parallel states are active; otherwise returns a single-element array.
       - State paths prepend leading `/` separators and delimit nested state hierarchies using `/`.
     - `stateValue: string | string[] | undefined` - Convenience helper for non-parallel machines. Returns the first string state path when `states.length === 1`, or `states` array otherwise.
-    - `context: PrivateKeyRemovedContext` - Public context data (properties starting with `_` are excluded).
+    - `context: PrivateKeyRemovedContext` - Public context data (properties starting with `_` are excluded). It is deeply frozen.
     - `c` - Convenience shorthand property for `context`.
     - `output: O | undefined` - Contains final execution output values when `runtimeStatus === 'done'`; `undefined` otherwise.
     - `error: unknown` - Contains error details if execution halted due to errors; `undefined` otherwise.

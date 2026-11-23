@@ -10,7 +10,7 @@ import type {
 } from '../machine/m.types'
 import { ST_DELIM } from '../shared/constants'
 import type { Expand } from '../shared/general.types'
-import { defineFixedProperty, reportUnhandledError } from '../shared/utils'
+import { deepFreeze, defineFixedProperty, reportUnhandledError, shallowFreeze } from '../shared/utils'
 import { MailBox } from './MailBox'
 import type { Children, RuntimeOutbound, StateRoute } from './r.types'
 import { initRuntime, macrostep } from './runtime_step'
@@ -264,10 +264,11 @@ export class Runtime<M extends AnyMachine> {
     let { context } = oldSnapshot
     const contextUpdated = newRealContext !== this.#realContext
     if (contextUpdated) {
+      shallowFreeze(newRealContext)
       this.#realContext = newRealContext
       context = !newRealContext
         ? newRealContext
-        : Object.entries(newRealContext).reduce(
+        : deepFreeze(Object.entries(newRealContext).reduce(
           (acc, [k, v]) => {
             if (!k.startsWith('_')) {
               acc[k as keyof X_RemovePrivateKeys<C<M>>] = v
@@ -275,7 +276,7 @@ export class Runtime<M extends AnyMachine> {
             return acc
           },
           {} as X_RemovePrivateKeys<C<M>>,
-        )
+        ))
     }
 
     return (doneEvent?: DoneEBody<unknown>) => {
