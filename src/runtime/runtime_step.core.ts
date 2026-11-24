@@ -33,7 +33,7 @@ import type {
 import { SystemEventSymbol } from '../machine/m.types'
 import { ST_DELIM } from '../shared/constants'
 import type { Placeholder, RecursiveRecord, Values } from '../shared/general.types'
-import { parentPathOf, shallowFreeze, splitStPath } from '../shared/utils'
+import { deepFreeze, parentPathOf, splitStPath } from '../shared/utils'
 import { makeRuntime } from './Runtime'
 import type { RuntimeOutbound, StateRoute } from './r.types'
 import {
@@ -316,7 +316,7 @@ export function readyAction<
       )
       context = { ...context, ...partial }
     }
-    context = shallowFreeze(context)
+    context = deepFreeze(context)
     updateApplications = []
   }
 

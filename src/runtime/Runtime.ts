@@ -267,7 +267,7 @@ export class Runtime<M extends AnyMachine> {
     let { context } = oldSnapshot
     const contextUpdated = newRealContext !== this.#realContext
     if (contextUpdated) {
-      shallowFreeze(newRealContext)
+      deepFreeze(newRealContext)
       this.#realContext = newRealContext
       context = !newRealContext
         ? newRealContext

@@ -526,9 +526,9 @@ Most callback functions receive an object matching `CommonArgs` as their first p
 
 - `CommonArgs`
   - `context`
-    - Current context value of the machine (`null` if `initContext` was omitted).
-    - Immutable object; direct mutations are disallowed. Use `ActionFn`'s `update` function to modify context fields.
-      - To prevent direct assignment, the properties at the first level (object properties) are frozen using `Object.freeze`. If you need to modify a first-level object as part of an update, create a copy using the spread syntax or a similar approach.
+    - The machine's current context value. If `initContext` is not configured on the machine, it becomes `null`.
+    - It is immutable and direct mutation is not allowed. When updating it, do so through the `update` function in `ActionFn`.
+      - Objects are recursively frozen with `Object.freeze` to prevent direct assignment. If you want to edit it for `update`, clone it using spread syntax or similar.
   - `c` - Shorthand property for `context`. Provided for convenience.
   - `event` - The event object that triggered the current action execution.
   - `e` - Shorthand property for `event`. Provided for convenience.
