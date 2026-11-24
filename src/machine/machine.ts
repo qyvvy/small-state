@@ -208,6 +208,10 @@ function on<
   return [eventType, (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A, S, Eb, Eg>, config as X_HiddenImpl] as const // StDefCoreItem, InvocationCleanupEvents
 }
 
+/**
+ * @param {Object} statesDefinition
+ * @param {string} [initialState]
+ */
 function subStates<
   C extends MContext,
   E extends SendableEvent,
@@ -347,6 +351,13 @@ type O_InferIvkSrcTypes<Src, S extends ServiceRecord> =
   : never
 
 // Overloads:
+/**
+ * @param service - invocation target: Machine | function | service-name
+ * @param {Object} [config] - invocation config
+ * @param {string|number} [config.subKey]
+ * @param {function} [config.input]
+ * @param [events] - invocation events: on(':done:', ...), on(':error:', ...)
+ */
 function invoke<
   C extends MContext,
   E extends SendableEvent,

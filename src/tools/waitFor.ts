@@ -1,6 +1,12 @@
 import type { AnyMachine } from '../machine/m.types'
 import type { Runtime, Snapshot } from '../runtime/Runtime'
 
+/**
+ * @param runtime
+ * @param {function} cond: (snapshot) => boolean
+ * @param {Object} [options]
+ * @param {number} [options.timeout]
+ */
 export async function waitFor<M extends AnyMachine>(
   runtime: Runtime<M>,
   cond: (snapshot: Snapshot<M>) => boolean,

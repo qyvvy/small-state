@@ -127,6 +127,10 @@ export class Runtime<M extends AnyMachine> {
     this.#buildAndSetSnapshot(context, true, 'notStarted')()
   }
 
+  /**
+   * @param {function} onSnapshot
+   * @param {function(Error): void} onError
+   */
   subscribe(onSnapshot: Subscriber<M>['onSnapshot'], onError?: Subscriber<M>['onError']) {
     const subscriber = { onSnapshot, onError }
     this.#subscribers.add(subscriber)
@@ -175,6 +179,10 @@ export class Runtime<M extends AnyMachine> {
     return this
   }
 
+  /**
+   * @param {string} emittedEventType
+   * @param {function} handler: (event) => void
+   */
   onEmitted<EMt extends EM<M>['type'], EMx extends O_ExtractEvent<EM<M>, EMt>>(
     emittedEventType: EMt,
     handler: (emittedEvent: EMx) => void,

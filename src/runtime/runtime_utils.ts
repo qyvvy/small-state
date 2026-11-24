@@ -57,6 +57,12 @@ function x_resolveActionElement<
   }
 }
 
+/**
+ * @param {function|string|Object} type
+ * @param {Object} machineGuards
+ * @param {*} [keyParams] - ParamsInputArgsOf: type に string (key) を指定したときのみ、これが params として使われる
+ * @returns {[function] | [function, params]}
+ */
 export function resolveGuardElement<
   C extends MContext,
   Ex extends SendableEvent | BuiltinSendableEvent,
@@ -73,6 +79,12 @@ export function resolveGuardElement<
   return x_resolveActionElement<TMachineFn, C, Ex, I>('Guard', type, machineGuards, keyParams)
 }
 
+/**
+ * @param {function|string|Object} type
+ * @param {Object} machineActions
+ * @param {*} [keyParams] - ParamsInputArgsOf: type に string (key) を指定したときのみ、これが params として使われる
+ * @returns {[function] | [function, params]}
+ */
 export function resolveActionElement<
   C extends MContext,
   Ex extends SendableEvent | BuiltinSendableEvent,
