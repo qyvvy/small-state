@@ -52,6 +52,7 @@ type X_TransitionCandidate = {
 }
 export type TransitionExec = {
   lca?: string // 遷移元: このパス配下の exit が深いところから順に呼ばれる
+  from: string | string[] // 遷移元(情報表示用): 遷移が起きないときには元ステートの候補を表示
   transition: NormalizedTransition
   tIndex: number
 }
@@ -107,7 +108,7 @@ function x_removeConflictedTransitions(
     return tCandidates.map(({ transition, tIndex, leaves }) => {
       const { fullTo } = transition
       const lca = !fullTo ? undefined : o_deriveLowestCommonAncestor(fullTo, leaves)
-      return { tIndex, transition, lca }
+      return { tIndex, transition, lca, from: lca || leaves }
     })
   }
 
@@ -118,7 +119,7 @@ function x_removeConflictedTransitions(
     const { transition, tIndex, leaves } = tCand
     const { fullTo } = transition
     if (!fullTo) {
-      stateStayingTExecs.push({ transition, tIndex })
+      stateStayingTExecs.push({ transition, tIndex, from: leaves })
       continue
     }
     const lca = o_deriveLowestCommonAncestor(fullTo, leaves)
@@ -129,9 +130,9 @@ function x_removeConflictedTransitions(
       return !candidates.length ? '' : candidates.reduce((a, b) => (a.length <= b.length ? a : b))
     })()
     if (!exitedParallel) {
-      nonPExitedTExecs.push({ transition, tIndex, lca })
+      nonPExitedTExecs.push({ transition, tIndex, lca, from: lca || leaves })
     } else if (!(exitedParallel in accStChangingTExecDict)) {
-      accStChangingTExecDict[exitedParallel] = { transition, tIndex, lca }
+      accStChangingTExecDict[exitedParallel] = { transition, tIndex, lca, from: lca || leaves }
     }
   }
 
