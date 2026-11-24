@@ -45,9 +45,8 @@ function execTExecActions<Eo extends SendableEvent>(
       }
     }
   } catch (err) {
-    const { lca, tIndex } = tExec!
-    const msg = err instanceof Error ? err.message : String(err)
-    console.error(`small-state: ${msg}`, { state: lca, location: `${errLocation}[${tIndex}], actions[${i!}]` })
+    const { tIndex, from } = tExec!
+    console.error(`small-state: ${String(err)}`, { state: from, location: `${errLocation}[${tIndex}], actions[${i!}]`, rawError: err })
     throw err
   }
 }
@@ -77,7 +76,8 @@ export function initRuntime<
   const tExecs: TransitionExec[] = [
     {
       transition: { to: initial, fullTo: `${ST_DELIM}${initial}`, guards: [], actions: [] },
-      tIndex: -1, // dummy
+      from: ':init:',
+      tIndex: 0, // dummy
     },
   ]
   const [hasTransitioned, doneEvent] = runMicrosteps(tExecs, crrStates, actionRunner, machineInternal, rtOutbound)
@@ -91,7 +91,7 @@ export function initRuntime<
 export function macrostep<
   C extends MContext,
   E extends SendableEvent,
-  Ex extends E | BuiltinSendableEvent | SystemSendableEvent,
+  Ex extends E | BuiltinSendableEvent | SystemSendableEvent<E>,
   I,
   EM extends EmittableEvent,
   G extends Record<string, Placeholder>,
@@ -118,7 +118,7 @@ export function macrostep<
     topLvDefItem,
   )
 
-  execTExecActions(tExecs, actionRunner, 'transition')
+  execTExecActions(tExecs, actionRunner, eType)
 
   const [hasTransitioned, doneEvent] = runMicrosteps(tExecs, crrStates, actionRunner, machineInternal, rtOutbound)
 
@@ -131,7 +131,7 @@ export function macrostep<
 function runMicrosteps<
   C extends MContext,
   E extends SendableEvent,
-  Ex extends E | BuiltinSendableEvent | SystemSendableEvent,
+  Ex extends E | BuiltinSendableEvent | SystemSendableEvent<E>,
   I,
   EM extends EmittableEvent,
   G extends Record<string, Placeholder>,
@@ -183,7 +183,7 @@ function runMicrosteps<
 function runExitAndEntryThenAlways<
   C extends MContext,
   E extends SendableEvent,
-  Ex extends E | BuiltinSendableEvent | SystemSendableEvent,
+  Ex extends E | BuiltinSendableEvent | SystemSendableEvent<E>,
   I,
   EM extends EmittableEvent,
   G extends Record<string, Placeholder>,
@@ -229,7 +229,7 @@ function runExitAndEntryThenAlways<
 function exitAndEntry<
   C extends MContext,
   E extends SendableEvent,
-  Ex extends E | BuiltinSendableEvent | SystemSendableEvent,
+  Ex extends E | BuiltinSendableEvent | SystemSendableEvent<E>,
   I,
   EM extends EmittableEvent,
   G extends Record<string, Placeholder>,
@@ -269,8 +269,7 @@ function exitAndEntry<
           }
         }
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        console.error(`small-state: ${msg}`, { runtimeId: rtOutbound.id, state: lca, location: `exitHooks[${i!}]` })
+        console.error(`small-state: ${String(err)}`, { runtimeId: rtOutbound.id, state: lca, location: `exitHooks[${i!}]`, rawError: err })
         throw err
       }
     }
@@ -318,9 +317,8 @@ function exitAndEntry<
         i += 1
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
       const pth = ST_DELIM + fullToSplittees[i]?.join(ST_DELIM)
-      console.error(`small-state: ${msg}`, { runtimeId: rtOutbound.id, state: pth, location: `entryHooks[${j!}]` })
+      console.error(`small-state: ${String(err)}`, { runtimeId: rtOutbound.id, state: pth, location: `entryHooks[${j!}]`, rawError: err })
       throw err
     }
     internalQueue.push(...genChildDoneEvents(accReachedFinal, makeFnBaseParam(), crrStates, stateCatalog))

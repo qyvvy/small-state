@@ -33,7 +33,7 @@ import type {
 import { SystemEventSymbol } from '../machine/m.types'
 import { ST_DELIM } from '../shared/constants'
 import type { Placeholder, RecursiveRecord, Values } from '../shared/general.types'
-import { parentPathOf, shallowFreeze, splitStPath } from '../shared/utils'
+import { deepFreeze, parentPathOf, splitStPath } from '../shared/utils'
 import { makeRuntime } from './Runtime'
 import type { RuntimeOutbound, StateRoute } from './r.types'
 import {
@@ -52,6 +52,7 @@ type X_TransitionCandidate = {
 }
 export type TransitionExec = {
   lca?: string // 遷移元: このパス配下の exit が深いところから順に呼ばれる
+  from: string | string[] // 遷移元(情報表示用): 遷移が起きないときには元ステートの候補を表示
   transition: NormalizedTransition
   tIndex: number
 }
@@ -107,7 +108,7 @@ function x_removeConflictedTransitions(
     return tCandidates.map(({ transition, tIndex, leaves }) => {
       const { fullTo } = transition
       const lca = !fullTo ? undefined : o_deriveLowestCommonAncestor(fullTo, leaves)
-      return { tIndex, transition, lca }
+      return { tIndex, transition, lca, from: lca || leaves }
     })
   }
 
@@ -118,7 +119,7 @@ function x_removeConflictedTransitions(
     const { transition, tIndex, leaves } = tCand
     const { fullTo } = transition
     if (!fullTo) {
-      stateStayingTExecs.push({ transition, tIndex })
+      stateStayingTExecs.push({ transition, tIndex, from: leaves })
       continue
     }
     const lca = o_deriveLowestCommonAncestor(fullTo, leaves)
@@ -129,9 +130,9 @@ function x_removeConflictedTransitions(
       return !candidates.length ? '' : candidates.reduce((a, b) => (a.length <= b.length ? a : b))
     })()
     if (!exitedParallel) {
-      nonPExitedTExecs.push({ transition, tIndex, lca })
+      nonPExitedTExecs.push({ transition, tIndex, lca, from: lca || leaves })
     } else if (!(exitedParallel in accStChangingTExecDict)) {
-      accStChangingTExecDict[exitedParallel] = { transition, tIndex, lca }
+      accStChangingTExecDict[exitedParallel] = { transition, tIndex, lca, from: lca || leaves }
     }
   }
 
@@ -253,10 +254,12 @@ function x_findDeepestTransitions(
 
 // ==
 
-function o_unwrapSystemEvent(
-  event: SendableEvent | BuiltinSendableEvent | SystemSendableEvent,
-): SendableEvent | BuiltinSendableEvent {
-  return !(SystemEventSymbol in event && event.payload) ? event : event.payload
+function o_unwrapSystemEvent<
+  E extends SendableEvent, Ex extends E | BuiltinSendableEvent
+>(
+  event: SendableEvent | BuiltinSendableEvent | SystemSendableEvent<E>,
+): [Ex, E] {
+  return !(SystemEventSymbol in event && event.payload) ? [event as Ex, event as E] : [event.payload as Ex, event.triggerEvent]
 }
 
 function o_evalActionParams<C extends MContext, Ex extends SendableEvent, I>(
@@ -276,8 +279,8 @@ export function readyAction<
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends ServiceRecord,
-  ExRaw extends E | BuiltinSendableEvent | SystemSendableEvent,
-  Ex extends E | BuiltinSendableEvent = Exclude<ExRaw, SystemSendableEvent>,
+  ExRaw extends E | BuiltinSendableEvent | SystemSendableEvent<E>,
+  Ex extends E | BuiltinSendableEvent = Exclude<ExRaw, SystemSendableEvent<E>>,
 >(
   origContext: Readonly<C>,
   rawEvent: ExRaw,
@@ -286,12 +289,12 @@ export function readyAction<
   machineActions: Machine<C, E, I, EM, any, any, any, any, any>['internal']['actions'],
   rtOutbound: RuntimeOutbound<E, EM, S>,
 ) {
-  const event = o_unwrapSystemEvent(rawEvent) as Ex
+  const [event, triggerEvent] = o_unwrapSystemEvent<E, Ex>(rawEvent)
   const { emit } = rtOutbound
   let context = origContext
   let updateApplications: UpdateFnParam<C>[] = []
   let enqActions: {
-    fn: (...arg: LimitedActionFnParams<C, Ex, I, EM>) => unknown
+    fn: (...arg: LimitedActionFnParams<C, Ex, I, EM, E>) => unknown
     params: any
   }[] = []
 
@@ -316,7 +319,7 @@ export function readyAction<
       )
       context = { ...context, ...partial }
     }
-    context = shallowFreeze(context)
+    context = deepFreeze(context)
     updateApplications = []
   }
 
@@ -353,54 +356,55 @@ export function readyAction<
       | Values<{
         [K in keyof A & string as unknown extends A[K] ? never : K]: { [K2 in K]: ParamsInput<A[K], C, Ex, I> }
       }>
-      | ((arg: LimitedActionFnParams<C, Ex, I, EM>[0]) => unknown),
+      | ((arg: LimitedActionFnParams<C, Ex, I, EM, E>[0]) => unknown),
     ...args: ParamsInputArgsOf<A, Ak, C, Ex, I>
   ) {
     if (isProcessingQueue) {
       throw new Error(`RT"${rtOutbound.id}"> Nested enqueue operations are not supported.`)
     }
-    const [fn, params] = resolveActionElement<C, Ex, I, EM>(type, machineActions, args?.[0])
+    const [fn, params] = resolveActionElement<C, Ex, I, EM, E>(type, machineActions, args?.[0])
     enqActions.push({ fn, params })
   }
 
-  let saveContext = origContext
-  let saveFnBaseParam: ReturnType<typeof runtimeUtils.makeFnBaseParam<C, Ex, I>>
+  let savedContext = origContext
+  let savedFnBaseParam: ReturnType<typeof runtimeUtils.makeFnBaseParam<C, Ex, I>>
 
   return {
     makeFnBaseParam() {
-      if (!(context === saveContext && saveFnBaseParam)) {
-        saveContext = context
-        saveFnBaseParam = runtimeUtils.makeFnBaseParam(context, event, input)
+      if (!(context === savedContext && savedFnBaseParam)) {
+        savedContext = context
+        savedFnBaseParam = runtimeUtils.makeFnBaseParam(context, event, input)
       }
-      return saveFnBaseParam
+      return savedFnBaseParam
     },
 
     execAction<Exx extends Eo extends undefined ? Ex : any, Eo extends SendableEvent | undefined = undefined>(
-      transitionAction: NormalizedAction<C, Ex, I, EM, G, A, S>,
+      transitionAction: NormalizedAction<C, Ex, I, EM, E, G, A, S>,
       eventOverride?: Eo,
     ) {
-      const bodies = resolveActionElement<C, Ex, I, EM, ActionFnParams<C, Ex, I, EM, G, A, S>[0]>(
+      const bodies = resolveActionElement<C, Ex, I, EM, E, ActionFnParams<C, Ex, I, EM, E, G, A, S>[0]>(
         transitionAction,
         machineActions,
       )
-      const qEvent = !eventOverride ? event : (o_unwrapSystemEvent(eventOverride) as Exx)
+      const qEvent = !eventOverride ? event : eventOverride as Exx
       if (bodies.length === 1) {
         bodies[0]({
           context,
           c: context,
           event: qEvent,
           e: qEvent,
+          triggerEvent,
           input,
           update,
           sendTo: sendTo as SendToFn<S>,
           emit,
           check: check as CheckFn<C, Ex, I, G>,
-          enqueue: enqueue as EnqueueFn<C, Ex, I, EM, A>,
+          enqueue: enqueue as EnqueueFn<C, Ex, I, EM, E, A>,
         })
       } else {
         const [fn, params] = bodies
         fn(
-          { context, c: context, event: qEvent, e: qEvent, input, update, emit },
+          { context, c: context, event: qEvent, e: qEvent, triggerEvent, input, update, emit },
           o_evalActionParams(params, context, qEvent, input),
         )
       }
@@ -413,7 +417,7 @@ export function readyAction<
       try {
         for (const { fn, params } of enqActions) {
           fn(
-            { context, c: context, event, e: event, input, update, emit },
+            { context, c: context, event, e: event, triggerEvent, input, update, emit },
             o_evalActionParams(params, context, event, input),
           )
           applyUpdate()
@@ -703,6 +707,7 @@ export function launchInvocations<E extends SendableEvent, S extends ServiceReco
 ) {
   const { enqueueEvent } = rtOutbound
   const fnBaseParam = makeFnBaseParam()
+  const { event: triggerEvent } = fnBaseParam
   for (const [i, { input, mainKey, subKey, src, emittableETypesToListen }] of invocations.entries()) {
     const [srcType, srcValue] = (() => {
       const { type, value } = src
@@ -723,6 +728,7 @@ export function launchInvocations<E extends SendableEvent, S extends ServiceReco
         {
           type: `invoke/:done:[${i}]` as const,
           payload: { type: ':done:', output },
+          triggerEvent,
           [SystemEventSymbol]: true,
         },
         { path },
@@ -732,6 +738,7 @@ export function launchInvocations<E extends SendableEvent, S extends ServiceReco
         {
           type: `invoke/:error:[${i}]` as const,
           payload: { type: ':error:', error },
+          triggerEvent,
           [SystemEventSymbol]: true,
         },
         { path },
@@ -758,6 +765,7 @@ export function launchInvocations<E extends SendableEvent, S extends ServiceReco
               {
                 type: `invoke/${eType}[${i}]` as const,
                 payload: emittedEvent,
+                triggerEvent,
                 [SystemEventSymbol]: true,
               },
               { path },
@@ -777,7 +785,7 @@ export function launchInvocations<E extends SendableEvent, S extends ServiceReco
             throw new Error(`RT"${rtOutbound.id}"> Invalid emittedEvent: ${JSON.stringify(emittedEvent)}`)
           }
           enqueueEvent(
-            { type: `invoke/${emittedEvent?.type}[${i}]` as const, payload: emittedEvent, [SystemEventSymbol]: true },
+            { type: `invoke/${emittedEvent?.type}[${i}]` as const, payload: emittedEvent, triggerEvent, [SystemEventSymbol]: true },
             { path },
           )
         }

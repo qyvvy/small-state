@@ -19,13 +19,13 @@ export function reportUnhandledError(err: unknown) {
 
 
 // == object 関係 ==
-function x_canFreeze(obj: unknown): obj is Record<PropertyKey, unknown> | Array<unknown> {
+function o_canFreeze(obj: unknown): obj is Record<PropertyKey, unknown> | Array<unknown> {
   return !!obj && typeof obj === 'object' && !ArrayBuffer.isView(obj)
 }
 
 // NOTE: 元のオブジェクトそのものを freeze する。同一性 （===） は変わらない
 export function deepFreeze<T>(obj: T) {
-  if (!(x_canFreeze(obj) || typeof obj === 'function')) {
+  if (!(o_canFreeze(obj) || typeof obj === 'function')) {
     return obj
   }
   try {
@@ -42,26 +42,6 @@ export function deepFreeze<T>(obj: T) {
     return Object.freeze(obj) as Readonly<T>
   } catch (error) {
     console.error("Error occurred in deepFreeze:", error)
-    return obj;
-  }
-}
-
-export function shallowFreeze<T>(obj: T) {
-  if (!x_canFreeze(obj)) {
-    return obj
-  }
-  try {
-    if (!Array.isArray(obj)) {
-      Object.keys(obj).forEach((key) => {
-        const ctxEl = (obj as { [key: string]: unknown })[key]
-        if (x_canFreeze(obj)) {
-          Object.freeze(ctxEl)
-        }
-      })
-    }
-    return Object.freeze(obj) as Readonly<T>
-  } catch (error) {
-    console.error("Error occurred in freeze:", error)
     return obj;
   }
 }

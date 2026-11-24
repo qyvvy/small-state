@@ -10,7 +10,7 @@ import type {
 } from '../machine/m.types'
 import { ST_DELIM } from '../shared/constants'
 import type { Expand } from '../shared/general.types'
-import { deepFreeze, defineFixedProperty, reportUnhandledError, shallowFreeze } from '../shared/utils'
+import { deepFreeze, defineFixedProperty, reportUnhandledError } from '../shared/utils'
 import { MailBox } from './MailBox'
 import type { Children, RuntimeOutbound, StateRoute } from './r.types'
 import { initRuntime, macrostep } from './runtime_step'
@@ -80,7 +80,7 @@ export class Runtime<M extends AnyMachine> {
   readonly #input!: I<M>
   #realContext!: Readonly<C<M>>
   #crrStates: StateRoute = []
-  #sentQueue: MailBox<E<M> | BuiltinSendableEvent | SystemSendableEvent, InternalEPayload> = new MailBox(
+  #sentQueue: MailBox<E<M> | BuiltinSendableEvent | SystemSendableEvent<E<M>>, InternalEPayload> = new MailBox(
     this.#processSentEvent.bind(this),
   )
   #enqueueEvent = this.#sentQueue.enqueue.bind(this.#sentQueue)
@@ -127,6 +127,10 @@ export class Runtime<M extends AnyMachine> {
     this.#buildAndSetSnapshot(context, true, 'notStarted')()
   }
 
+  /**
+   * @param {function} onSnapshot
+   * @param {function(Error): void} onError
+   */
   subscribe(onSnapshot: Subscriber<M>['onSnapshot'], onError?: Subscriber<M>['onError']) {
     const subscriber = { onSnapshot, onError }
     this.#subscribers.add(subscriber)
@@ -175,6 +179,10 @@ export class Runtime<M extends AnyMachine> {
     return this
   }
 
+  /**
+   * @param {string} emittedEventType
+   * @param {function} handler: (event) => void
+   */
   onEmitted<EMt extends EM<M>['type'], EMx extends O_ExtractEvent<EM<M>, EMt>>(
     emittedEventType: EMt,
     handler: (emittedEvent: EMx) => void,
@@ -191,7 +199,7 @@ export class Runtime<M extends AnyMachine> {
     }
   }
 
-  #processSentEvent<Ex extends E<M> | BuiltinSendableEvent | SystemSendableEvent>(
+  #processSentEvent<Ex extends E<M> | BuiltinSendableEvent | SystemSendableEvent<E<M>>>(
     event: Ex,
     internalEPayload?: InternalEPayload,
   ) {
@@ -267,7 +275,7 @@ export class Runtime<M extends AnyMachine> {
     let { context } = oldSnapshot
     const contextUpdated = newRealContext !== this.#realContext
     if (contextUpdated) {
-      shallowFreeze(newRealContext)
+      deepFreeze(newRealContext)
       this.#realContext = newRealContext
       context = !newRealContext
         ? newRealContext

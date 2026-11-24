@@ -1285,6 +1285,7 @@ describe('runtime_step.core', () => {
       ).toEqual([
         {
           lca: '/A/AA',
+          from: '/A/AA',
           tIndex: 1,
           transition: {
             to: 'AAC',
@@ -1377,6 +1378,7 @@ describe('runtime_step.core', () => {
       ).toEqual([
         {
           lca: '/a/a1',
+          from: '/a/a1',
           tIndex: 0,
           transition: {
             actions: [],
@@ -1502,6 +1504,7 @@ describe('runtime_step.core', () => {
       ).toEqual([
         {
           lca: '/a/a1',
+          from: '/a/a1',
           tIndex: 0,
           transition: {
             to: 'a1b',
@@ -1512,6 +1515,7 @@ describe('runtime_step.core', () => {
         },
         {
           lca: '/a/a2/a2a/a2a2',
+          from: '/a/a2/a2a/a2a2',
           tIndex: 0,
           transition: {
             to: '/a/a2/a2a/a2a2/a2a2c',
@@ -1649,6 +1653,10 @@ describe('runtime_step.core', () => {
       ).toEqual([
         {
           lca: '', // parallel root が遷移元になる
+          from: [
+            '/a/a2/a2a/a2a1/a2a1a',
+            '/a/a2/a2a/a2a2/a2a2a',
+          ],
           tIndex: 0,
           transition: {
             to: '/b/ba',
@@ -1751,6 +1759,7 @@ describe('runtime_step.core', () => {
         ).toEqual([
           {
             lca: '/a/a1/a1a/a1a1',
+            from: '/a/a1/a1a/a1a1',
             tIndex: 1,
             transition: {
               to: 'a1a1b',
@@ -1850,6 +1859,7 @@ describe('runtime_step.core', () => {
         ).toEqual([
           {
             lca: undefined,
+            from: ['/a/a1/a1a/a1a1/a1a1a'],
             tIndex: 0,
             transition: {
               actions: [],
@@ -1939,6 +1949,7 @@ describe('runtime_step.core', () => {
         ).toEqual([
           {
             lca: undefined,
+            from: ['/a/a1/a1a/a1a1/a1a1a'],
             tIndex: 0,
             transition: {
               actions: [],
@@ -2081,6 +2092,11 @@ describe('runtime_step.core', () => {
         ).toEqual([
           {
             lca: '',
+            from: [
+              '/a/a1/a1a',
+              '/a/a2/a2a/a2a1/a2a1a',
+              '/a/a2/a2a/a2a2/a2a2a',
+            ],
             tIndex: 0,
             transition: {
               to: '/b',
@@ -2114,6 +2130,10 @@ describe('runtime_step.core', () => {
         ).toEqual([
           {
             lca: '',
+            from: [
+              '/a/a2/a2a/a2a1/a2a1a',
+              '/a/a2/a2a/a2a2/a2a2a',
+            ],
             tIndex: 0,
             transition: {
               to: '/c',
@@ -2241,6 +2261,11 @@ describe('runtime_step.core', () => {
         ).toEqual([
           {
             lca: '',
+            from: [
+              '/a/a1/a1a',
+              '/a/a2/a2a/a2a1/a2a1a',
+              '/a/a2/a2a/a2a2/a2a2a',
+            ],
             tIndex: 0,
             transition: {
               to: 'b',
@@ -2368,6 +2393,7 @@ describe('runtime_step.core', () => {
       ).toEqual([
         {
           lca: '/a/a2',
+          from: '/a/a2',
           tIndex: 0,
           transition: {
             to: 'a2b',
@@ -2383,10 +2409,10 @@ describe('runtime_step.core', () => {
   describe('x_removeConflictedTransitions()', () => {
     beforeAll(async () => { })
 
-    describe('1: from (移動元)の選ばれ方', () => {
+    describe('1: lca (移動元)の選ばれ方', () => {
       beforeAll(async () => { })
 
-      test('1.1: leaves から fullTo と同族のステートが from として選ばれる', async () => {
+      test('1.1: leaves から fullTo と同族のステートが lca として選ばれる', async () => {
         expect(
           x_removeConflictedTransitions(
             [
@@ -2402,13 +2428,14 @@ describe('runtime_step.core', () => {
         ).toEqual([
           {
             lca: '/a/a2',
+            from: '/a/a2',
             tIndex: 0,
             transition: { to: '/a/a2/a2c', fullTo: '/a/a2/a2c', actions: [], guards: [] },
           },
         ])
       })
 
-      test('1.2: fullTo と同族のステートがない場合、 leaves のパス群の共通親が from として選ばれる', async () => {
+      test('1.2: fullTo と同族のステートがない場合、 leaves のパス群の共通親が lca として選ばれる', async () => {
         expect(
           x_removeConflictedTransitions(
             [
@@ -2421,7 +2448,15 @@ describe('runtime_step.core', () => {
             ],
             ['/a/aa'],
           ),
-        ).toEqual([{ lca: '', tIndex: 0, transition: { to: '/b', fullTo: '/b', actions: [], guards: [] } }])
+        ).toEqual([{
+          lca: '',
+          from: [
+            '/a/aa/aa1/aa1a',
+            '/a/aa/aa2/aa2b/aa2ba',
+          ],
+          tIndex: 0,
+          transition: { to: '/b', fullTo: '/b', actions: [], guards: [] }
+        }])
       })
     })
 
@@ -2438,7 +2473,7 @@ describe('runtime_step.core', () => {
           ],
           ['/a'],
         ),
-      ).toEqual([{ lca: '', tIndex: 0, transition: { to: '/a/a1/a', fullTo: '/a/a1/a', actions: [], guards: [] } }])
+      ).toEqual([{ lca: '', from: ['/b/ba'], tIndex: 0, transition: { to: '/a/a1/a', fullTo: '/a/a1/a', actions: [], guards: [] } }])
     })
 
     test('2.2: 別 parallel から parallel への遷移', async () => {
@@ -2454,7 +2489,7 @@ describe('runtime_step.core', () => {
           ],
           ['/a', '/b'],
         ),
-      ).toEqual([{ lca: '', tIndex: 0, transition: { to: '/a/a1/a', fullTo: '/a/a1/a', actions: [], guards: [] } }])
+      ).toEqual([{ lca: '', from: ['/b/b1/b1a', '/b/b2/b2a'], tIndex: 0, transition: { to: '/a/a1/a', fullTo: '/a/a1/a', actions: [], guards: [] } }])
     })
 
     test('3: 同じ parallel から抜ける遷移が複数あるとき、先に定義されているほうを採用する。to がない処理はそのまま残す', async () => {
@@ -2484,8 +2519,8 @@ describe('runtime_step.core', () => {
           ['/a'],
         ),
       ).toEqual([
-        { lca: undefined, tIndex: 0, transition: { actions: [], guards: [] } },
-        { lca: '', tIndex: 0, transition: { to: '/b', fullTo: '/b', actions: [], guards: [] } },
+        { lca: undefined, from: ['/a/a3/a3a'], tIndex: 0, transition: { actions: [], guards: [] } },
+        { lca: '', from: ['/a/a1/a1a'], tIndex: 0, transition: { to: '/b', fullTo: '/b', actions: [], guards: [] } },
       ])
     })
 
@@ -2521,18 +2556,20 @@ describe('runtime_step.core', () => {
           ['/a/a2/a2a', '/a'],
         ),
       ).toEqual([
-        { lca: '/a/a1', tIndex: 0, transition: { to: '/a/a1/a1b', fullTo: '/a/a1/a1b', actions: [], guards: [] } },
+        { lca: '/a/a1', from: '/a/a1', tIndex: 0, transition: { to: '/a/a1/a1b', fullTo: '/a/a1/a1b', actions: [], guards: [] } },
         {
           lca: '/a/a2/a2a/a2a1',
+          from: '/a/a2/a2a/a2a1',
           tIndex: 0,
           transition: { to: '/a/a2/a2a/a2a1/a2a1b', fullTo: '/a/a2/a2a/a2a1/a2a1b', actions: [], guards: [] },
         },
         {
           lca: '/a/a2/a2a/a2a2',
+          from: '/a/a2/a2a/a2a2',
           tIndex: 0,
           transition: { to: '/a/a2/a2a/a2a2/a2a2c', fullTo: '/a/a2/a2a/a2a2/a2a2c', actions: [], guards: [] },
         },
-        { lca: '/a/a3', tIndex: 0, transition: { to: '/a/a3/a3e', fullTo: '/a/a3/a3e', actions: [], guards: [] } },
+        { lca: '/a/a3', from: '/a/a3', tIndex: 0, transition: { to: '/a/a3/a3e', fullTo: '/a/a3/a3e', actions: [], guards: [] } },
       ])
     })
 
@@ -2568,9 +2605,9 @@ describe('runtime_step.core', () => {
           ['/a/a2/a2a', '/a'],
         ),
       ).toEqual([
-        { lca: '/a/a2', tIndex: 0, transition: { to: '/a/a2/a2b', fullTo: '/a/a2/a2b', actions: [], guards: [] } },
-        { lca: '/a/a1', tIndex: 0, transition: { to: '/a/a1/a1b', fullTo: '/a/a1/a1b', actions: [], guards: [] } },
-        { lca: '/a/a3', tIndex: 0, transition: { to: '/a/a3/a3e', fullTo: '/a/a3/a3e', actions: [], guards: [] } },
+        { lca: '/a/a2', from: '/a/a2', tIndex: 0, transition: { to: '/a/a2/a2b', fullTo: '/a/a2/a2b', actions: [], guards: [] } },
+        { lca: '/a/a1', from: '/a/a1', tIndex: 0, transition: { to: '/a/a1/a1b', fullTo: '/a/a1/a1b', actions: [], guards: [] } },
+        { lca: '/a/a3', from: '/a/a3', tIndex: 0, transition: { to: '/a/a3/a3e', fullTo: '/a/a3/a3e', actions: [], guards: [] } },
       ])
     })
 
@@ -2608,9 +2645,9 @@ describe('runtime_step.core', () => {
           ['/a/a2/a2a', '/a'],
         ),
       ).toEqual([
-        { tIndex: 0, transition: { actions: [], guards: [] } },
-        { tIndex: 0, transition: { actions: [], guards: [] } },
-        { lca: '', tIndex: 0, transition: { to: '/b', fullTo: '/b', actions: [], guards: [] } },
+        { from: ['/a/a1/a1c'], tIndex: 0, transition: { actions: [], guards: [] } },
+        { from: ['/a/a5/a5a'], tIndex: 0, transition: { actions: [], guards: [] } },
+        { lca: '', from: ['/a/a2/a2a/a2a2/a2a2b'], tIndex: 0, transition: { to: '/b', fullTo: '/b', actions: [], guards: [] } },
       ])
     })
 
@@ -2637,11 +2674,13 @@ describe('runtime_step.core', () => {
         ).toEqual([
           {
             lca: '/a/aa/aa1/aa1a/aa1a1',
+            from: '/a/aa/aa1/aa1a/aa1a1',
             tIndex: 0,
             transition: { to: '', fullTo: '/a/aa/aa1/aa1a/aa1a1/aa1a1b', actions: [], guards: [] },
           },
           {
             lca: '/a/aa/aa1/aa1a/aa1a2',
+            from: '/a/aa/aa1/aa1a/aa1a2',
             tIndex: 0,
             transition: { to: '', fullTo: '/a/aa/aa1/aa1a/aa1a2/aa1a2b', actions: [], guards: [] },
           },
@@ -2668,7 +2707,7 @@ describe('runtime_step.core', () => {
             ['/a/aa/aa1/aa1a', '/a/aa/aa2/aa2a', '/a/ab/abb', '/a/aa'],
           ),
         ).toEqual([
-          { lca: '/a/aa/aa1', tIndex: 0, transition: { to: '', fullTo: '/a/aa/aa1/aa1b', actions: [], guards: [] } },
+          { lca: '/a/aa/aa1', from: '/a/aa/aa1', tIndex: 0, transition: { to: '', fullTo: '/a/aa/aa1/aa1b', actions: [], guards: [] } },
         ])
       })
 
@@ -2697,7 +2736,7 @@ describe('runtime_step.core', () => {
             ],
             ['/a/aa/aa1/aa1a', '/a/aa/aa2/aa2a', '/a/ab/abb', '/a/aa'],
           ),
-        ).toEqual([{ lca: '/a', tIndex: 0, transition: { to: '', fullTo: '/a/ab', actions: [], guards: [] } }])
+        ).toEqual([{ lca: '/a', from: '/a', tIndex: 0, transition: { to: '', fullTo: '/a/ab', actions: [], guards: [] } }])
       })
     })
   })
