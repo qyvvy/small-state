@@ -15,20 +15,21 @@ import type { StateRoute } from './r.types'
 
 type MachineGuardFn<C extends MContext, E extends SendableEvent, I> = (...args: FnBaseParams<C, E, I>) => boolean
 
-type MachineActionFn<C extends MContext, E extends SendableEvent, I, EM extends EmittableEvent> = (
-  ...args: LimitedActionFnParams<C, E, I, EM>
+type MachineActionFn<C extends MContext, Ex extends SendableEvent, I, EM extends EmittableEvent, Eg extends SendableEvent> = (
+  ...args: LimitedActionFnParams<C, Ex, I, EM, Eg>
 ) => unknown
 
 function x_resolveActionElement<
-  TMachineFn extends MachineGuardFn<C, E, I> | MachineActionFn<C, E, I, EM>,
+  TMachineFn extends MachineGuardFn<C, Ex, I> | MachineActionFn<C, Ex, I, EM, Eg>,
   C extends MContext,
-  E extends SendableEvent | BuiltinSendableEvent,
+  Ex extends SendableEvent | BuiltinSendableEvent,
   I,
   EM extends EmittableEvent = EmittableEvent,
+  Eg extends SendableEvent = Ex,
   TTypeArg = Parameters<TMachineFn>[0],
 >(
   kind: string,
-  type: string | ((arg: TTypeArg) => ReturnType<TMachineFn>) | Record<string, ParamsInput<unknown, C, E, I>>,
+  type: string | ((arg: TTypeArg) => ReturnType<TMachineFn>) | Record<string, ParamsInput<unknown, C, Ex, I>>,
   implRecord: Record<string, TMachineFn>,
   keyParams: unknown = undefined,
 ): [fn: (arg: TTypeArg) => ReturnType<TMachineFn>] | [fn: TMachineFn, params: undefined | unknown | AnyFn] {
@@ -58,18 +59,18 @@ function x_resolveActionElement<
 
 export function resolveGuardElement<
   C extends MContext,
-  E extends SendableEvent | BuiltinSendableEvent,
+  Ex extends SendableEvent | BuiltinSendableEvent,
   I,
-  TMachineFn extends MachineGuardFn<C, E, I> = MachineGuardFn<C, E, I>,
+  TMachineFn extends MachineGuardFn<C, Ex, I> = MachineGuardFn<C, Ex, I>,
 >(
   type:
     | string
     | ((arg: Parameters<TMachineFn>[0]) => ReturnType<TMachineFn>)
-    | Record<string, ParamsInput<unknown, C, E, I>>,
+    | Record<string, ParamsInput<unknown, C, Ex, I>>,
   machineGuards: Record<string, TMachineFn>,
   keyParams: unknown = undefined,
 ) {
-  return x_resolveActionElement<TMachineFn, C, E, I>('Guard', type, machineGuards, keyParams)
+  return x_resolveActionElement<TMachineFn, C, Ex, I>('Guard', type, machineGuards, keyParams)
 }
 
 export function resolveActionElement<
@@ -77,14 +78,15 @@ export function resolveActionElement<
   Ex extends SendableEvent | BuiltinSendableEvent,
   I,
   EM extends EmittableEvent,
-  TTypeArg = LimitedActionFnParams<C, Ex, I, EM>[0],
-  TMachineFn extends MachineActionFn<C, Ex, I, EM> = MachineActionFn<C, Ex, I, EM>,
+  Eg extends SendableEvent | BuiltinSendableEvent,
+  TTypeArg = LimitedActionFnParams<C, Ex, I, EM, Eg>[0],
+  TMachineFn extends MachineActionFn<C, Ex, I, EM, Eg> = MachineActionFn<C, Ex, I, EM, Eg>,
 >(
   type: string | ((arg: TTypeArg) => ReturnType<TMachineFn>) | Record<string, ParamsInput<unknown, C, Ex, I>>,
   machineActions: Record<string, TMachineFn>,
   keyParams: unknown = undefined,
 ) {
-  return x_resolveActionElement<TMachineFn, C, Ex, I, EM, TTypeArg>('Action', type, machineActions, keyParams)
+  return x_resolveActionElement<TMachineFn, C, Ex, I, EM, Eg, TTypeArg>('Action', type, machineActions, keyParams)
 }
 
 export const runtimeUtils = {

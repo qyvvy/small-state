@@ -15,14 +15,15 @@ export type DoneEBody<O> = { type: ':done:', output: O }
 export type ErrorEBody = { type: ':error:', error: unknown }
 
 export const SystemEventSymbol: unique symbol = Symbol('SystemEvent')
-export type SystemSendableEvent =
+export type SystemSendableEvent<Eg extends SendableEvent> =
   | {
     type: `invoke/${string}[${number}]`
     [SystemEventSymbol]: true
     payload: { type: string;[key: string]: any }
+    triggerEvent: Eg
   }
   | { type: `system/${string}` }
-export type InternalEType = BuiltinEType | SystemSendableEvent['type']
+export type InternalEType = BuiltinEType | SystemSendableEvent<any>['type']
 export type InternalEPayload = { path: string } | EmptyRecord
 
 export type MContext = Record<string, any>
@@ -47,27 +48,31 @@ export type ActionFnParams<
   Ex extends SendableEvent,
   I,
   EM extends EmittableEvent,
+  Eg extends SendableEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends ServiceRecord
 > = FnBaseParams<C, Ex, I,
   {
     check: CheckFn<C, Ex, I, G>
-    enqueue: EnqueueFn<C, Ex, I, EM, A>
+    enqueue: EnqueueFn<C, Ex, I, EM, Eg, A>
     update: UpdateFn<C>
     emit: EmitFn<EM>
     sendTo: SendToFn<S>
+    triggerEvent: Eg
   }
 >
 export type LimitedActionFnParams<
   C extends MContext,
-  E extends SendableEvent,
+  Ex extends SendableEvent,
   I,
   EM extends EmittableEvent,
+  Eg extends SendableEvent,
   Prm = any
-> = FnBaseParams<C, E, I, {
+> = FnBaseParams<C, Ex, I, {
   update: UpdateFn<C>,
   emit: EmitFn<EM>
+  triggerEvent: Eg
   // TODO: sendTo を追加できるか検討。S を持ってくるのが難しいから保留してるような気がする。
 }, Prm>
 
@@ -90,11 +95,11 @@ export type CheckFn<
  * enqueue(fn: (arg: FnBaseParams & {update: UpdateFn, emit: EmitFn}) => void): void
  */
 export type EnqueueFn<
-  C extends MContext, Ex extends SendableEvent, I, EM extends EmittableEvent, A extends Record<string, Placeholder>
+  C extends MContext, Ex extends SendableEvent, I, EM extends EmittableEvent, Eg extends SendableEvent, A extends Record<string, Placeholder>
 > = {
   (type: Values<{ [K in keyof A & string as unknown extends A[K] ? never : K]: { [K2 in K]: ParamsInput<A[K], C, Ex, I> } }>): void
   <Ak extends keyof A & string | never>(type: Ak, ...args: ParamsInputArgsOf<A, Ak, C, Ex, I>): void
-  (fn: (arg: LimitedActionFnParams<C, Ex, I, EM>[0]) => void): void
+  (fn: (arg: LimitedActionFnParams<C, Ex, I, EM, Eg>[0]) => void): void
 }
 
 // TODO: もし Cが narrow されるのなら Duplicate する
@@ -133,12 +138,12 @@ export type ListenFn<E extends SendableEvent> = (listener: (event: E) => void) =
 type X_NormalizedGuard<C extends MContext = any, Ex extends SendableEvent = any, I = any> =
   ((arg: FnBaseParams<C, Ex, I>[0]) => boolean) | string | Record<string, ParamsInput<unknown, C, Ex, I>>
 export type NormalizedAction<
-  C extends MContext = any, Ex extends SendableEvent = any, I = any, EM extends EmittableEvent = any,
+  C extends MContext = any, Ex extends SendableEvent = any, I = any, EM extends EmittableEvent = any, Eg extends SendableEvent = any,
   G extends Record<string, Placeholder> = any,
   A extends Record<string, Placeholder> = any,
   S extends ServiceRecord = ServiceRecord
 > =
-  ((arg: ActionFnParams<C, Ex, I, EM, G, A, S>[0]) => unknown) | string | Record<string, ParamsInput<unknown, C, Ex, I>>
+  ((arg: ActionFnParams<C, Ex, I, EM, Eg, G, A, S>[0]) => unknown) | string | Record<string, ParamsInput<unknown, C, Ex, I>>
 export type NormalizedTransition = {
   to?: StateName
   fullTo?: string
@@ -231,7 +236,7 @@ export type MachineConfig<
   initContext?: (input: I) => LowInfer<C>
   output?: (arg: FnBaseParams<C, DoneEBody<unknown>, I>[0]) => O
   guards?: { [K in keyof G]: (arg: FnBaseParams<C, E, I>[0], params: G[K]) => boolean }
-  actions?: { [K in keyof A & string]: (arg: LimitedActionFnParams<C, E, I, EM>[0], params: A[K]) => unknown }
+  actions?: { [K in keyof A & string]: (arg: LimitedActionFnParams<C, E, I, EM, E>[0], params: A[K]) => unknown }
   services?: S
 }
 
@@ -260,7 +265,7 @@ export type Machine<
     output: undefined | ((arg: FnBaseParams<C, DoneEBody<unknown>, I, unknown>[0]) => O)
     guards: { [K in keyof G]: (arg: FnBaseParams<C, E | BuiltinSendableEvent, I>[0], params: G[K]) => boolean }
     actions: {
-      [K in keyof A]: (arg: LimitedActionFnParams<C, E | BuiltinSendableEvent, I, EM>[0], params: A[K]) => unknown
+      [K in keyof A]: (arg: LimitedActionFnParams<C, E | BuiltinSendableEvent, I, EM, E>[0], params: A[K]) => unknown
     }
     services: S
     definition: ND
@@ -275,7 +280,7 @@ export type Machine<
     implementations: {
       guards?: { [K in keyof nG]: (arg: FnBaseParams<C, E | BuiltinSendableEvent, I>[0], params: nG[K]) => boolean },
       actions?: {
-        [K in keyof nA]: (arg: LimitedActionFnParams<C, E | BuiltinSendableEvent, I, EM>[0], params: nA[K]) => unknown
+        [K in keyof nA]: (arg: LimitedActionFnParams<C, E | BuiltinSendableEvent, I, EM, E>[0], params: nA[K]) => unknown
       }
       services?: nS
     }

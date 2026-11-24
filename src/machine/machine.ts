@@ -56,6 +56,7 @@ type X_DefTypeRefluxer<
   A extends Record<string, Placeholder>,
   S extends ServiceRecord = ServiceRecord,
   Eb extends BuiltinEType = BuiltinEType,
+  Eg extends SendableEvent = E,
   Ret = unknown,
 > = () => Ret
 
@@ -105,10 +106,11 @@ type Action<
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends ServiceRecord,
+  Eg extends SendableEvent = Ex,
 > =
   | Expand<X_ImplKeys<A>>
   | Values<{ [K in keyof A & string as unknown extends A[K] ? never : K]: { [K2 in K]: ParamsInput<A[K], C, Ex, I> } }> // { [actionName: string]: Params }
-  | ((arg: ActionFnParams<C, Ex, I, EM, G, A, S>[0]) => unknown)
+  | ((arg: ActionFnParams<C, Ex, I, EM, Eg, G, A, S>[0]) => unknown)
 
 type StDefMetaInfo<C extends MContext, E extends SendableEvent, I> = {
   final?: boolean | ((args: FnBaseParams<C, E, I>[0]) => unknown)
@@ -181,13 +183,14 @@ type O_Transition<
   Ex extends SendableEvent,
   I,
   EM extends EmittableEvent,
+  Eg extends SendableEvent,
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends ServiceRecord,
 > = {
   to?: StateName
   guard?: OneOrMany<Guard<C, Ex, I, G>>
-  actions?: OneOrMany<Action<C, Ex, I, EM, G, A, S>>
+  actions?: OneOrMany<Action<C, Ex, I, EM, G, A, S, Eg>>
 }
 
 function on<
@@ -199,9 +202,10 @@ function on<
   const A extends Record<string, Placeholder>,
   S extends ServiceRecord,
   Et extends [E] extends [never] ? string : E['type'] | Eb | never,
+  Eg extends SendableEvent,
   Eb extends BuiltinEType = BuiltinEType,
->(eventType: Et, config: OneOrMany<Expand<O_Transition<C, O_ExtractEvent<E, Et>, I, EM, G, A, S>>>) {
-  return [eventType, (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A, S, Eb>, config as X_HiddenImpl] as const // StDefCoreItem, InvocationCleanupEvents
+>(eventType: Et, config: OneOrMany<Expand<O_Transition<C, O_ExtractEvent<E, Et>, I, EM, Eg, G, A, S>>>) {
+  return [eventType, (() => null) as X_DefTypeRefluxer<C, E, I, EM, G, A, S, Eb, Eg>, config as X_HiddenImpl] as const // StDefCoreItem, InvocationCleanupEvents
 }
 
 function subStates<
@@ -216,7 +220,7 @@ function subStates<
   const Initial extends keyof D & string,
 >(statesDefinition: D, initialState?: Initial) {
   return [
-    (() => SubStatesSymbol) as X_DefTypeRefluxer<C, E, I, EM, G, A, S, BuiltinEType, typeof SubStatesSymbol>,
+    (() => SubStatesSymbol) as X_DefTypeRefluxer<C, E, I, EM, G, A, S, BuiltinEType, E, typeof SubStatesSymbol>,
     transformNormalizedDefinition(statesDefinition, initialState) as {
       initial: [Initial] extends [never] ? undefined : Initial
       stateOf: {
@@ -253,7 +257,7 @@ function parallel<
   },
 >(parallelDefinition: PD) {
   return [
-    (() => ParallelSymbol) as X_DefTypeRefluxer<C, E, I, EM, G, A, S, BuiltinEType, typeof ParallelSymbol>,
+    (() => ParallelSymbol) as X_DefTypeRefluxer<C, E, I, EM, G, A, S, BuiltinEType, E, typeof ParallelSymbol>,
     transformParallelNormalizedDefinition<C, E, I, EM, G, A, S>()<typeof parallelDefinition>(
       parallelDefinition,
     ) as unknown as {
@@ -299,21 +303,22 @@ type InvocationEvents<
   G extends Record<string, Placeholder>,
   A extends Record<string, Placeholder>,
   S extends ServiceRecord,
+  Eg extends SendableEvent,
   TSrcTypes extends { Type: 'm' | 'f'; EM: EmittableEvent; O: unknown },
 > = Array<
   | readonly [
     string,
-    NoInfer<X_DefTypeRefluxer<C, Expand<DoneEBody<TSrcTypes['O']>>, I, EM, G, A, S, never>>,
+    NoInfer<X_DefTypeRefluxer<C, Expand<DoneEBody<TSrcTypes['O']>>, I, EM, G, A, S, never, Eg>>,
     X_HiddenImpl,
   ]
-  | readonly [string, X_DefTypeRefluxer<C, ErrorEBody, I, EM, G, A, S, never>, X_HiddenImpl]
+  | readonly [string, X_DefTypeRefluxer<C, ErrorEBody, I, EM, G, A, S, never, Eg>, X_HiddenImpl]
 
   // マシン対象時、EM が any であっても builtin を補完に表示させる
   // :done: と EmittableEvent を混ぜさせない
   | (TSrcTypes['Type'] extends 'm'
     ? IsAny<TSrcTypes['EM']> extends false
     ? IsEqual<TSrcTypes['EM'], EmittableEvent> extends false
-    ? readonly [string, X_DefTypeRefluxer<C, TSrcTypes['EM'], I, EM, G, A, S, never>, X_HiddenImpl]
+    ? readonly [string, X_DefTypeRefluxer<C, TSrcTypes['EM'], I, EM, G, A, S, never, Eg>, X_HiddenImpl]
     : never
     : never
     : never)
@@ -321,7 +326,7 @@ type InvocationEvents<
   // NOTE: 現状、引数にEmittableEvent の型を指定する場合、 defServiceFn でラップしないと機能しない。
   | (TSrcTypes['Type'] extends 'f'
     ? IsEqual<TSrcTypes['EM'], EmittableEvent> extends false
-    ? readonly [string, X_DefTypeRefluxer<C, TSrcTypes['EM'], I, EM, G, A, S, never>, X_HiddenImpl]
+    ? readonly [string, X_DefTypeRefluxer<C, TSrcTypes['EM'], I, EM, G, A, S, never, Eg>, X_HiddenImpl]
     : never
     : never)
 >
@@ -354,14 +359,14 @@ function invoke<
   SrcInput = never,
 >(
   service: Src,
-  ...events: InvocationEvents<C, I, EM, G, A, S, O_InferIvkSrcTypes<Src, S>>
+  ...events: InvocationEvents<C, I, EM, G, A, S, E, O_InferIvkSrcTypes<Src, S>>
 ): readonly [
   typeof InvokeSymbol,
-  X_DefTypeRefluxer<C, E, I, EM, G, A, S, BuiltinEType, unknown>,
+  X_DefTypeRefluxer<C, E, I, EM, G, A, S, BuiltinEType>,
   null,
   X_HiddenImpl,
   X_HiddenImpl,
-  InvocationEvents<C, I, EM, G, A, S, O_InferIvkSrcTypes<Src, S>>,
+  InvocationEvents<C, I, EM, G, A, S, E, O_InferIvkSrcTypes<Src, S>>,
 ]
 
 function invoke<
@@ -377,14 +382,14 @@ function invoke<
 >(
   service: Src,
   config: InvokeConfig<C, E, I, S, Src, SrcInput>,
-  ...events: InvocationEvents<C, I, EM, G, A, S, O_InferIvkSrcTypes<Src, S>>
+  ...events: InvocationEvents<C, I, EM, G, A, S, E, O_InferIvkSrcTypes<Src, S>>
 ): readonly [
   typeof InvokeSymbol,
-  X_DefTypeRefluxer<C, E, I, EM, G, A, S, BuiltinEType, unknown>,
+  X_DefTypeRefluxer<C, E, I, EM, G, A, S, BuiltinEType>,
   null,
   X_HiddenImpl,
   X_HiddenImpl,
-  InvocationEvents<C, I, EM, G, A, S, O_InferIvkSrcTypes<Src, S>>,
+  InvocationEvents<C, I, EM, G, A, S, E, O_InferIvkSrcTypes<Src, S>>,
 ]
 
 // Implementation:
@@ -403,13 +408,13 @@ function invoke<
   ...args:
     | [
       config: InvokeConfig<C, E, I, S, Src, SrcInput>,
-      ...events: InvocationEvents<C, I, EM, G, A, S, O_InferIvkSrcTypes<Src, S>>,
+      ...events: InvocationEvents<C, I, EM, G, A, S, E, O_InferIvkSrcTypes<Src, S>>,
     ]
-    | InvocationEvents<C, I, EM, G, A, S, O_InferIvkSrcTypes<Src, S>>
+    | InvocationEvents<C, I, EM, G, A, S, E, O_InferIvkSrcTypes<Src, S>>
 ) {
   const [config, events] = ((): [
     InvokeConfig<C, E, I, S, Src, SrcInput>,
-    InvocationEvents<C, I, EM, G, A, S, O_InferIvkSrcTypes<Src, S>>,
+    InvocationEvents<C, I, EM, G, A, S, E, O_InferIvkSrcTypes<Src, S>>,
   ] => {
     if (!args.length) return [{}, []]
     if (Array.isArray(args[0])) return [{}, args as any]
@@ -958,7 +963,7 @@ function provide<
   implementations: {
     guards?: { [K in keyof nG]: (arg: FnBaseParams<C, E | BuiltinSendableEvent, I>[0], params: nG[K]) => boolean }
     actions?: {
-      [K in keyof nA]: (arg: LimitedActionFnParams<C, E | BuiltinSendableEvent, I, EM>[0], params: nA[K]) => unknown
+      [K in keyof nA]: (arg: LimitedActionFnParams<C, E | BuiltinSendableEvent, I, EM, E>[0], params: nA[K]) => unknown
     }
     services?: nS
   },

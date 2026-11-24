@@ -22,7 +22,7 @@ export type Children<S extends ServiceRecord> = {
 } & { [key: string]: Child<any> }
 export type RuntimeOutbound<E extends SendableEvent, EM extends EmittableEvent, S extends ServiceRecord> = {
   id: string
-  enqueueEvent: (event: E | BuiltinSendableEvent | SystemSendableEvent, payload?: InternalEPayload) => void
+  enqueueEvent: (event: E | BuiltinSendableEvent | SystemSendableEvent<E>, payload?: InternalEPayload) => void
   emit: (eventToEmit: EM) => void
   children: Children<S>
 }

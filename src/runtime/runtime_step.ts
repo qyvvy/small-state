@@ -91,7 +91,7 @@ export function initRuntime<
 export function macrostep<
   C extends MContext,
   E extends SendableEvent,
-  Ex extends E | BuiltinSendableEvent | SystemSendableEvent,
+  Ex extends E | BuiltinSendableEvent | SystemSendableEvent<E>,
   I,
   EM extends EmittableEvent,
   G extends Record<string, Placeholder>,
@@ -131,7 +131,7 @@ export function macrostep<
 function runMicrosteps<
   C extends MContext,
   E extends SendableEvent,
-  Ex extends E | BuiltinSendableEvent | SystemSendableEvent,
+  Ex extends E | BuiltinSendableEvent | SystemSendableEvent<E>,
   I,
   EM extends EmittableEvent,
   G extends Record<string, Placeholder>,
@@ -183,7 +183,7 @@ function runMicrosteps<
 function runExitAndEntryThenAlways<
   C extends MContext,
   E extends SendableEvent,
-  Ex extends E | BuiltinSendableEvent | SystemSendableEvent,
+  Ex extends E | BuiltinSendableEvent | SystemSendableEvent<E>,
   I,
   EM extends EmittableEvent,
   G extends Record<string, Placeholder>,
@@ -229,7 +229,7 @@ function runExitAndEntryThenAlways<
 function exitAndEntry<
   C extends MContext,
   E extends SendableEvent,
-  Ex extends E | BuiltinSendableEvent | SystemSendableEvent,
+  Ex extends E | BuiltinSendableEvent | SystemSendableEvent<E>,
   I,
   EM extends EmittableEvent,
   G extends Record<string, Placeholder>,
