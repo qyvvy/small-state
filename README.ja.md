@@ -414,7 +414,7 @@ idle 内で LOGIN_SUCCESS を受け取ると、定義に従い "loggedIn" ステ
 - `guards?: Record<string, (args: CommonArgs, params: unknown)=>boolean>`
   - 遷移時に各アクションを実行するかどうかの判定に使われる関数を登録する。ここに登録した guard は名前でアクセスできるようになる。
   - 第二引数 params に型を指定すると呼び出された時に任意の値を追加で受け取ることができる。params を設定した guard を呼ぶときには文字列の代わりにキーにガード名、値に params の値か、paramsの値を返す関数を指定したオブジェクト`{[guardName:string]: ParamsValueOrFn}`を代わりに使う。
-- `actions?: Record<string, (arg: {context, c, event, e, input, update, emit}, params: unknown)=>unknown>`
+- `actions?: Record<string, (arg: {context, c, event, e, input, update, emit, triggerEvent}, params: unknown)=>unknown>`
   - 遷移時に実行するアクション関数を登録する。ここに登録した action は名前でアクセスできるようになる。
   - 第二引数 params に型を指定すると呼び出された時に任意の値を追加で受け取ることができる。params を設定した action を呼ぶときには文字列の代わりにキーにアクション名、値に params の値か、paramsの値を返す関数を指定したオブジェクト`{[actionName:string]: ParamsValueOrFn}`を代わりに使う。
 - `services?: Record<string, AnyMachine | ServiceFn>`
@@ -545,6 +545,40 @@ entryHook や exitHook や on で使うことができる ActionFn の第一引�
     - マシンの場合、 MachineConfig.types.emittable で型を指定する。
   - ランタイム側からは runtime.onEmitted でこのイベントを購読できる。
   - もし invoke されているサービスから emit した場合、 invoke 関数内の on から購読することができる。
+- `triggerEvent: SendableEvent`
+  - **NOTE: 試験的機能**
+  - 遷移を発生させた大本のイベント。つまり send されたイベント。大抵の場合、 `event` `e` と同じだが、':done:' や ':always:' のような内部イベントに処理が移ってもこれは変わらない。
+  - 例えば invoke の結果を使いながら send されたイベントも使いたいときに使うとよい。
+  ```ts
+  invoke(
+    'fetchData',
+    on(':done:', {
+      to: 'idle',
+      actions: ({ e: { output }, triggerEvent: e, update, input, emit }) => {
+        try {
+          switch (e.type) {
+            case 'register':
+            case 'updateRecord':
+              break
+            default:
+              throw new Error(`Unexpected process: event.type:${e.type}`)
+          }
+          const errs = validate(e.newRecords, output)
+          if (errs) {
+            update({errs})
+            return
+          }
+          input.register(e.newRecords)
+          update({records: e.newRecords})
+          emit({ type: 'notify', message: 'Entry updated.' })
+        } catch (err) {
+          emit({ type: 'notify', message: String(err) })
+          console.error(err)
+        }
+      },
+    }),
+  ),
+  ```
 - `sendTo: (service: string, subKey?: string|number, event: EventOfService) => void`
   - invoke されて現在起動しているマシンや関数にイベントを send する。
   - 受け付けられるイベントはマシンの場合そのマシンが send で受け取れるイベント、関数の場合、listen で登録されているイベントである。
@@ -560,7 +594,7 @@ entryHook や exitHook や on で使うことができる ActionFn の第一引�
 - `enqueue`
 - `enqueue: (type: string, params?: ParamsValue | ((args: CommonArgs)=>ParamValue)) => void`
 - `enqueue: (type: {[guardName: string]: ParamsValueOrFn}) => void`
-- `enqueue: (fn: (args: {context, c, event, e, input, update, emit})=>void) => void`
+- `enqueue: (fn: (args: {context, c, event, e, input, update, emit, triggerEvent})=>void) => void`
   - check と組み合わせることで実行するアクションを動的に組み立てることができる。enqueue に与えられたアクションはすぐに実行されるのではなく実行が予約され、現在のアクションを抜けた後に enqueue された順に実行が開始される。
   - type に action名を指定するか、パラメーター付きのアクションをオブジェクトで指定するほかに、関数のリテラルを直接渡すこともできる。
     - 外側の関数内や直前の enqueue で update を実行した場合、外側の context は更新反映前の古い context になるので、context を使うのなら enqueue の内側の関数に渡される引数の context を参照する必要がある。

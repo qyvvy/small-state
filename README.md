@@ -418,7 +418,7 @@ A dictionary object containing basic machine settings and configuration properti
 - `guards?: Record<string, (args: CommonArgs, params: unknown)=>boolean>`
   - Register guard functions used to evaluate transition eligibility. Registered guard functions can be referenced by string names.
   - If a guard accepts parameters via its second argument `params`, pass an object formatted as `{[guardName: string]: ParamsValueOrFn}` (where the value is either a parameter value or a function returning it) instead of a simple string name when referencing the guard.
-- `actions?: Record<string, (arg: {context, c, event, e, input, update, emit}, params: unknown)=>unknown>`
+- `actions?: Record<string, (arg: {context, c, event, e, input, update, emit, triggerEvent}, params: unknown)=>unknown>`
   - Register side-effect action functions to execute during transitions. Registered actions can be referenced by string names.
   - If an action accepts parameters via its second argument `params`, pass an object formatted as `{[actionName: string]: ParamsValueOrFn}` (where the value is either a parameter value or a function returning it) instead of a simple string name when calling the action.
 - `services?: Record<string, AnyMachine | ServiceFn>`
@@ -549,6 +549,40 @@ First-argument objects passed to `ActionFn` handlers in `entryHook`, `exitHook`,
     - Define types on `MachineConfig.types.emittable`.
   - Subscribed externally on runtimes via `runtime.onEmitted`.
   - If emitted from invoked services, parent machines can subscribe using `on` handlers inside `invoke`.
+- `triggerEvent: SendableEvent`
+  - **NOTE: Experimental feature**
+  - The root event that triggered the transition—that is, the event that was sent. In most cases, it is the same as `event` / `e`, but it remains unchanged even when processing moves to internal events such as `':done:'` or `':always:'`.
+  - For example, this is useful when you want to access the original sent event while using the result of an `invoke`.
+  ```ts
+  invoke(
+    'fetchData',
+    on(':done:', {
+      to: 'idle',
+      actions: ({ e: { output }, triggerEvent: e, update, input, emit }) => {
+        try {
+          switch (e.type) {
+            case 'register':
+            case 'updateRecord':
+              break
+            default:
+              throw new Error(`Unexpected process: event.type:${e.type}`)
+          }
+          const errs = validate(e.newRecords, output)
+          if (errs) {
+            update({errs})
+            return
+          }
+          input.register(e.newRecords)
+          update({records: e.newRecords})
+          emit({ type: 'notify', message: 'Entry updated.' })
+        } catch (err) {
+          emit({ type: 'notify', message: String(err) })
+          console.error(err)
+        }
+      },
+    }),
+  ),
+  ```
 - `sendTo: (service: string, subKey?: string|number, event: EventOfService) => void`
   - Dispatches events to active invoked machine or service function targets.
   - Target events must match acceptable send events for machines or registered `listen` handlers for service functions.
@@ -563,7 +597,7 @@ First-argument objects passed to `ActionFn` handlers in `entryHook`, `exitHook`,
 - `enqueue`
 - `enqueue: (type: string, params?: ParamsValue | ((args: CommonArgs)=>ParamValue)) => void`
 - `enqueue: (type: {[guardName: string]: ParamsValueOrFn}) => void`
-- `enqueue: (fn: (args: {context, c, event, e, input, update, emit})=>void) => void`
+- `enqueue: (fn: (args: {context, c, event, e, input, update, emit, triggerEvent})=>void) => void`
   - Used with `check` to build dynamic execution queues. Enqueued actions do not run immediately; they are scheduled to execute sequentially after exiting the active action function scope.
   - Accepts registered action names, parameterized action configuration objects, or inline action functions.
   - If `update` was called outside or in a preceding action, reference context inside enqueued callback parameters to read updated context states.
